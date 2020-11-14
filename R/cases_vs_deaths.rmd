@@ -1,0 +1,455 @@
+---
+title: "COVID-19 Cases vs. Mortality"
+date: "11/14/2020"
+author: "Art Steinmetz"
+output: html_notebook
+---
+I have a macabre fascination with tracking the course of the COVID-19 pandemic. I suspect there are two reasons for this. One, by delving into the numbers I imagine I have some control over this thing.  Second, it feels like lighting a candle to show that science can reveal truth at a time when the darkness of anti-science is creeping across the land. 
+
+The purpose of this project is, as usual, twofold.  First, to explore an interesting data science question and, second, to explore some techniques and packages in the R universe.  We will be looking at the relationship of COVID-19 cases to mortality.  What is the lag between a positive case and a death?  How does that vary among states?  How has it varied as the pandemic has progressed? This is an interesting project because is combines elements of time series forecasting and dependent variable prediction.
+
+I have been thinking about how to measure mortality lags for a while now.  What prompted to do a write-up was discovering a new function in Matt Dancho's `timetk` package, `tk_augment_lags`, which makes short work of building multiple lags.  Not too long ago, managing models for multiple lags and multiple states would have been a bit messy.  The emerging "tidy models" framework from RStudio using "list columns" is immensely powerful for this sort of thing.  I was almost giddy ("Nerd!") when I was able to reduce so much analysis into so few lines of code.
+ 
+# Introduction
+
+There is no shortage of data to work with. Here we will use the NY Times COVID tracking data set which is updated daily.  The package `covid19nytimes` lets us refresh the data on demand.
+
+
+```{r Initialize, message=FALSE, warning=FALSE, paged.print=FALSE}
+# correlate deaths and cases by state
+library(tidyverse)
+library(covid19nytimes)
+library(timetk)
+library(lubridate)
+library(broom)
+
+# source https://github.com/nytimes/covid-19-data.git
+us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
+
+# Remove tiny territories
+territories <- c("Guam","Northern Mariana Islands")
+us_states_long <- us_states_long %>% filter(!(location %in% territories))
+save(us_states_long,file="data/us_states_long.rdata")
+us_states_long %>% glimpse()
+```
+
+The NY Times data is presented in a "long" format.  When we start modeling, long will suit us well but first we have to add features to help us and that will require `pivot`ing to wide, adding features and then back to long.  The daily data is so irregular the first features we will add are 7-day moving averages to smooth the series.  We'll also do a nation-level analysis first so we aggregate the state data as well.
+
+```{r clean data, message=FALSE, warning=FALSE}
+# Create rolling average changes
+# pivot wider
+# this will also be needed when we create lags
+us_states <- us_states_long %>%
+  # discard dates before cases were tracked.
+  filter(date > as.Date("2020-03-01")) %>% 
+  pivot_wider(names_from="data_type",values_from="value") %>% 
+  rename(state=location) %>%
+  select(date,state,cases_total,deaths_total) %>%
+  mutate(state = as_factor(state)) %>% 
+  arrange(state,date) %>% 
+  group_by(state) %>%
+  #smooth the data with 7 day moving average
+  mutate(cases_7day = (cases_total - lag(cases_total,7))/7) %>%
+  mutate(deaths_7day = (deaths_total - lag(deaths_total,7))/7) %>%
+  {.}
+
+# national analysis
+# ----------------------------------------------
+# aggregate state to national
+us <- us_states %>%
+  group_by(date) %>% 
+  summarize(across(.cols=where(is.double),
+                   .fns = function(x)sum(x,na.rm = T),
+                   .names="{.col}"))
+
+us %>% glimpse()
+```
+Let's look at the cumulative case and death counts in the U.S.  It is bad form to put lines with different scales on a plot but it's worthwhile to compare the slopes of each line.  New cases (in yellow) are accelerating but mortality (in red) is not. 
+```{r show cumulative, message=TRUE, warning=FALSE}
+coeff <- 30
+us %>% 
+  ggplot(aes(date,cases_total)) + geom_line(color="orange") +
+  theme(legend.position = "none") +
+  geom_line(aes(y=deaths_total*coeff),color="red") +
+  scale_y_continuous(labels = scales::comma,
+                     name = "Cases",
+                     sec.axis = sec_axis(deaths_total~./coeff,
+                                         name="Deaths",
+                                         labels = scales::comma)) +
+  theme(
+    axis.title.y = element_text(color = "orange", size=13),
+    axis.title.y.right = element_text(color = "red", size=13)
+  ) +
+  labs(title =  "U.S. Cases vs. Deaths",
+       caption = "Source: NY Times, Arthur Steinmetz"
+       x = "Date")
+```
+We might be tempted to simply regress deaths vs. cases but a scatter plot shows us that would not be satisfactory.  As it turns out, the relationship of cases and deaths is strongly conditioned on date.
+
+```{r}
+# does a simple scatterplot tell us anything 
+# about the relationship of deaths to cases? No.
+us %>% 
+  ggplot(aes(deaths_7day,cases_7day)) + geom_point() +
+  labs(caption = "Source: NY Times, Arthur Steinmetz")
+```
+We can get much more insight plotting smoothed deaths and cases over time.  A couple of observations are obvious.  First when cases start to rise, deaths follow with a lag.  Second, we have had three spikes in cases so far and in each successive instance the mortality has risen by a smaller amount.  This suggests that, thankfully, we are getting better at treating this disease. It is NOT a function of increased testing because [positivity rates](http://91-divoc.com/pages/covid-visualization/?chart=countries&highlight=United%20States&show=highlight-only&y=highlight&scale=linear&data=testPositivity-daily-7&data-source=merged&xaxis=right-12wk#countries) have not been falling.
+
+
+```{r}
+#visualize the relationship between rolling average of weekly scases and deaths
+us %>% 
+  ggplot(aes(date,cases_7day)) + geom_line(color="orange") +
+  theme(legend.position = "none") +
+  geom_line(aes(x=date,y=deaths_7day*coeff),color="red") +
+  scale_y_continuous(labels = scales::comma,
+                     name = "Cases",
+                     sec.axis = sec_axis(deaths_7day~./coeff,
+                                         name="Deaths",
+                                         labels = scales::comma)) +
+  theme(
+    axis.title.y = element_text(color = "orange", size=13),
+    axis.title.y.right = element_text(color = "red", size=13)
+  ) +
+  labs(title =  "U.S. Cases vs. Deaths",
+       subtitle = "7-Day Average",
+       caption = "Source: NY Times, Arthur Steinmetz",
+       x = "Date")
+```
+This illustrates a problem for any modeling we might do.It looks like the more cases surge, the less the impact on deaths.  This is NOT a valid conclusion. A simple regression of deaths vs. cases and time shows the passage of time has more explanatory power than cases in predicting deaths so we have to take that into account.
+
+```{r}
+# passage of time affects deaths more than cases
+lm(deaths_7day~cases_7day+date,data=us) %>% tidy()
+```
+## Build Some Models
+We'll approach this by running linear models of deaths and varying lags (actually leads) of cases.  We chose to lead cases as opposed to lagging deaths becuase it will allow us to make predictions about the future of deaths given cases today.  We include the date as a variable as well.  Once we've run regressions against each lead period, we'll chose the lead period that has the best fit (R-Squared) to the data.
+
+The requires a lot of leads and a lot of models. Fortunately, R provides the tools to make this work very simple and well organized.  First we add new columns for each lead period using `timetk::tk_augment_lags`.  This one function call does all the work but it only does lags so we have to futz with it a bit to get leads.
+
+I chose to add sixty days of leads. I don't really think that long a lead is realistic and, given the pandemic has been around only nine months, there aren't as many data points sixty days ahead.  Still, I want to see the behavior of the models.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#create columns for deaths led 0 to 30 days ahead
+us_lags <- us %>%
+  # create lags by day
+  tk_augment_lags(deaths_7day,.lags = 0:-60,.names="auto") %>% 
+  # create lags by week is using weekly data
+  # tk_augment_lags(deaths_7day,.lags = -8:0,.names="auto") %>% 
+  {.}
+# fix names to remove minus sign
+names(us_lags) <- names(us_lags) %>% str_replace_all("lag-","lead")
+us_lags[1:15] %>% glimpse()
+```
+...etc up to 60.
+
+Now we start the job of actually building the linear models and seeing the real power of the tidy modeling framework. You may want to construct this as one function pipeline but I separate it into small pieces for clarity.  Since we have our lead days in columns we revert back to long-form data.  For each date we have a case count and 60 lead days with the corresponding death count.
+
+```{r paged.print=FALSE}
+# make long form to nest
+# initialize models data frame
+models <- us_lags %>% ungroup %>% 
+  pivot_longer(cols = contains("lead"),
+               names_to = "lead",
+               values_to = "led_deaths") %>% 
+  select(date,cases_7day,lead,led_deaths) %>% 
+  mutate(lead = as.numeric(str_remove(lead,"deaths_7day_lead")))
+
+models
+```
+This gives us all dates and all rows in one data frame.  Our goal is to have a separate model for each lag day.  We use `nest` for this.
+
+```{r paged.print=FALSE}
+# make separate tibbles for each regression
+models <- models %>% 
+  nest(data=c(date,cases_7day,led_deaths))
+
+models
+```
+Each row represents a lead time and each data frame in the `data` list-column contains all the dates, the case count and the deaths associated with that lead time.  Now we can run the actual regressions in one fell swoop using `map'. 
+
+```{r paged.print=FALSE}
+#Run a linear regression on lagged cases and date vs deaths
+
+models <- models %>% 
+  mutate(model = map(data,
+                     function(df) 
+                       lm(led_deaths~cases_7day+date,data = df)))
+models
+```
+Now that we've added a linear regression object to each row, we complete the job by plucking out the adjusted r-squared using `glance` to tell us how well each model fits the data.
+
+```{r paged.print=FALSE}
+# Add regression coefficient
+# get adjusted r squared
+models <- models %>% 
+  mutate(adj_r = map(model,function(x) glance(x) %>% 
+                       pull(adj.r.squared))
+         %>% unlist)
+models
+```
+
+In a perfect world we could just select the model with the highest R-squared but the real world is messier than that.
+
+```{r}
+# Show model fit by lead time
+# make predictions using best model
+best_fit <- models %>% 
+  summarize(adj_r = max(adj_r)) %>% 
+  left_join(models,by= "adj_r")
+
+models %>%
+  ggplot(aes(lead,adj_r)) + geom_line() +
+  labs(subtitle = paste("Best fit lead =",best_fit$lead,"days"),
+       title = "Model Fit By Lag Days",
+       x = "Lead Time in Days for Deaths",
+       caption = "Source: NY Times, Arthur Steinmetz",
+       y= "Adjusted R-squared")
+```
+## Make Predictions
+60 days?  Can that be right?  Let's use `predict` to see how well our model fits to the actual deaths.
+
+```{r message=FALSE, warning=FALSE}
+# ------------------------------------------
+# see how well our model predicts
+# Function to create prediction plot
+show_predictions <- function(single_model,n.ahead){
+  complete_cases <- single_model$data[[1]] %>% 
+#    remove_missing() %>% 
+    {.}
+  
+  newdata <- complete_cases[(nrow(complete_cases)-n.ahead+1):nrow(complete_cases),]
+  
+  predictions <- enframe(predict(single_model$model[[1]]),
+                         name = NULL,
+                         value = paste0("predicted_in_","ahead","_days"))
+  predictions_ahead <- enframe(predict(single_model$model[[1]],newdata = newdata),
+                               name = NULL,
+                               value = paste0("predicted_in_","ahead","_days"))
+  
+gg <- bind_rows(predictions,predictions_ahead)  %>% 
+    bind_cols(complete_cases) %>% 
+    rename(cases=cases_7day,
+           deaths_actual=led_deaths,
+           deaths_predicted=predicted_in_ahead_days) %>%
+    select(-cases) %>% 
+    pivot_longer(cols = where(is.numeric)) %>% 
+    ggplot(aes(date,value,color=name)) + geom_line() +
+  labs(title="Actual vs. Predicted Deaths",
+       caption = "Source: NY Times, Arthur Steinmetz")
+gg
+}
+
+# best adj_r is not the best fit
+show_predictions(best_fit,best_fit$lead)
+```
+The 60-day lag shows cases dropping to zero soon.  We wish that would happen but it seems unlikely.  A look at the regression coefficients shows the problem. They show a negative sign on new cases (which are soaring again). That's clearly nonsense.
+```{r}
+models[60,]$model[[1]] %>% tidy()
+```
+What to do?  A glance at the model fit plot above shows a local maximum fit at 14 days, which seems like a more plausible outcome.  Let's try that for our lead time.
+
+```{r message=FALSE, warning=FALSE}
+# local maximum of 14 days gives  much more satisfactory result
+lag_override <- 14
+show_predictions(models[lag_override,],lag_override)
+```
+This is a much more sensible result, and sadly shows deaths about to spike. This is despite accounting for the improvements in treatment outcomes we've accomplished over the past several months.  The 14-day lead time model shows a 2% mortality rate over the whole length of observations but conditioned on deaths dropping by 6 cases each day time passes.
+
+```{r}
+models[14,]$model[[1]] %>% tidy()
+```
+## State-Level Analysis
+The big problem with the national model is each state saw the arrival of the virus at different times, which suggests there might also be different relationships between cases and deaths.  Looking at a few selected states illustrates this.
+```{r warning=FALSE, fig.width=6}
+# ------------------------------------------
+# state by state analysis
+
+state_subset <- c("New York","Texas","California","Ohio")
+
+# illustrate selected states
+us_states %>% 
+  filter(state %in% state_subset) %>% 
+  ggplot(aes(date,cases_7day)) + geom_line(color="orange") +
+  facet_wrap(~state,scales = "free") +
+  theme(legend.position = "none") +
+  geom_line(aes(y=deaths_7day*coeff),color="red") +
+  scale_y_continuous(labels = scales::comma,
+                     name = "Cases",
+                     sec.axis = sec_axis(deaths_7day~./coeff,
+                                         name="Deaths",
+                                         labels = scales::comma)) +
+  theme(
+    axis.title.y = element_text(color = "orange", size=13),
+    axis.title.y.right = element_text(color = "red", size=13)
+  ) +
+  labs(title =  "U.S. Cases vs. Deaths",
+       subtitle = "7-Day Average",
+       caption = "Source: NY Times, Arthur Steinmetz",
+       x = "Date")
+```
+In particular we note New York, where the virus arrived early and circulated undetected for weeks. Testing was rare and we did not know much about the course of the disease so the death toll was much worse.  Tests were often not conducted until the disease was in advanced stages so we would expect the lag to be shorter.
+
+In Texas, the virus arrived later.  There it looks like the consequences of the first wave were less dire and the lag was longer.
+
+## Run State Models
+Now we can run the same workflow we used above over the state-by-state data.  Our data set is much larger because we have a full set of lags for each state but building our data frame of list columns is just as easy.  
+
+1. Create the lags.
+2. Pivot to long form.
+3. `nest` the data by lead day and state.
+4. `map` each set to a linear model.
+5. Pull out the adjusted R-Squared for each model to determine the best fit lead time.
+
+Looking at the lags by state shows much better behaved data.  The R-squareds seem higher and the optimal lead time is more clearly visible.  Early in the pandemic, in New York, cases were diagnosed only for people who were already sick so, as we suspected, the lead time before death was much shorter.
+
+```{r message=FALSE, warning=FALSE, fig.width=6}
+# create lags
+us_states_lags <- us_states %>%
+  # create lags by day
+  tk_augment_lags(deaths_7day,.lags = -60:0,.names="auto") %>% 
+  {.}
+# fix names to remove minus sign
+names(us_states_lags) <- names(us_states_lags) %>% str_replace_all("lag-","lead")
+
+# make long form to nest
+# initialize models data frame
+models_st <- us_states_lags %>% ungroup %>% 
+  pivot_longer(cols = contains("lead"),
+               names_to = "lead",
+               values_to = "led_deaths") %>% 
+  select(state,date,cases_7day,lead,led_deaths) %>% 
+  mutate(lead = as.numeric(str_remove(lead,"deaths_7day_lead"))) %>% 
+  {.}
+
+# make separate tibbles for each regression
+models_st <- models_st %>% 
+  nest(data=c(date,cases_7day,led_deaths)) %>% 
+  arrange(lead)
+
+#Run a linear regression on lagged cases and date vs deaths
+models_st <- models_st %>% 
+  mutate(model = map(data,
+                     function(df) 
+                       lm(led_deaths~cases_7day+date,data = df)))
+
+
+# Add regression coefficient
+# get adjusted r squared
+models_st <- models_st %>% 
+  mutate(adj_r = map(model,function(x) glance(x) %>% 
+                       pull(adj.r.squared))
+         %>% unlist)
+
+models_st %>%
+  filter(state %in% state_subset) %>% 
+  ggplot(aes(lead,adj_r)) + geom_line() +
+  facet_wrap(~state) +
+  labs(title = "Best Fit Lead Time",
+       caption = "Source: NY Times, Arthur Steinmetz")
+```
+
+To see how the fit looks for the data set as a whole we look at a histogram of all the state R-squareds.  We see most of the state models do a better job than the national model.
+```{r message=FALSE, warning=FALSE}
+# best fit lag by state
+best_fit_st <- models_st %>% 
+  group_by(state) %>% 
+  summarize(adj_r = max(adj_r)) %>% 
+  left_join(models_st)
+
+best_fit_st %>% ggplot(aes(adj_r)) + 
+  geom_histogram(bins = 10,color="white") +
+  geom_vline(xintercept = models$adj_r[lag_override],color="red") +
+  annotate(geom="text",x=0.45,y=12,label="Adj-R in National Model") +
+  labs(y = "State Count",
+       x="Adjusted R-Squared",
+       title = "Goodness of Fit of State Models",
+       caption = "Source:NY Times,Arthur Steinmetz")
+```
+
+We also see a clear clustering of the case-to-death best-fit lead time among the states.  Around 15 days from a positive test to death is most common.
+```{r}
+best_fit_st %>% ggplot(aes(lead)) + 
+  geom_histogram(binwidth = 5,color="white") +
+  labs(y = "State Count",
+    x="Best Fit Model Days from Case to Death",
+    title = "COVID-19 Lag Time From Cases to Death",
+    caption = "Source:NY Times,Arthur Steinmetz")
+```
+
+## Validate with Case Data
+This whole exercise has involved proxying deaths by time and quantity of positive tests.  Ideally, we should look at longitudinal data which follows each individual.  The state of Ohio provides that so we'll look at just this one state to provide a reality check on the foregoing analysis.  The fit of our Ohio model is not among our strongest but the best-fit lead time is 20 days.
+```{r}
+# ----------------------------------------------------
+best_fit_st %>% select(-data,-model) %>% filter(state == "Ohio")
+```
+When we have individual case data, we see the average true lead time is 17 days, so there is rough agreement.  The caveat here is the NY Times data uses case onset which is presumably the date a positive test is recorded. The Ohio data uses "Onset Date," which is the date the "illness began."  That is not necessarily the same as the test date.
+
+```{r message=FALSE, warning=FALSE}
+# source: https://coronavirus.ohio.gov/static/COVIDSummaryData.csv
+ohio_raw <- read_csv("https://coronavirus.ohio.gov/static/COVIDSummaryData.csv", 
+                     col_types = cols(`Admission Date` = col_date(format = "%m/%d/%Y"), 
+                                      `Date Of Death` = col_date(format = "%m/%d/%Y"), 
+                                      `Onset Date` = col_date(format = "%m/%d/%Y")))
+
+# helper function to fix column names to best practice
+fix_df_colnames <- function(df){
+  names(df)<-names(df) %>% 
+    str_replace_all(c(" " = "_" , "," = "" )) %>% 
+    tolower()
+  return(df)
+}
+
+# clean up the data
+ohio <- ohio_raw %>% 
+  rename(death_count = `Death Due to Illness Count`) %>% 
+  filter(County != "Grand Total") %>% 
+  fix_df_colnames()
+
+
+# aggregate the data to weekly
+ohio <- ohio %>% 
+  mutate(onset_to_death = as.numeric(date_of_death - onset_date),
+         onset_year = year(onset_date),
+         onset_week = epiweek(onset_date))
+
+
+onset_to_death <- ohio %>%
+  filter(death_count > 0) %>% 
+  group_by(onset_year,onset_week) %>%
+  summarise(death_count_sum = sum(death_count),
+            mean_onset_to_death = weighted.mean(onset_to_death,
+                                                death_count,
+                                                na.rm = TRUE)) %>%
+  mutate(date=as.Date(paste(onset_year,onset_week,1),"%Y %U %u")) %>%
+  {.}
+
+# helper function to annotate plots 
+pos_index <- function(index_vec,fraction){
+  return(index_vec[round(length(index_vec)*fraction)])
+}
+
+avg_lag <- mean(onset_to_death$mean_onset_to_death)
+
+onset_to_death %>% ggplot(aes(date,mean_onset_to_death)) + 
+  geom_col() +
+  geom_hline(yintercept = avg_lag) +
+  annotate(geom="text",
+           label=paste("Average Lag =",round(avg_lag)),
+           y=20,x=pos_index(onset_to_death$date,.8)) +
+  labs(x = "Onset Date",
+       y = "Mean Onset to Death",
+       title = "Ohio Days from Illness Onset Until Death Over Time",
+       caption = "Source: State of Ohio, Arthur Steinmetz",
+       subtitle = paste("Average =",
+                     round(mean(onset_to_death$mean_onset_to_death)),"Days"))
+
+```
+Note the drop off at the end of the date range.  This is because we don't yet know the outcome of the most recently recorded cases.  The long duration from onset to death in the early days is driven by a few outliers when there were very few cases.  Generally, while we have been successful in lowering the fatality rate of this disease, the duration from onset to death for those cases which are fatal has not changed much, at least in Ohio.
+
+## Conclusion
+
+Among the vexing aspects of this terrible pandemic is that we don't know what the gold standard is for treatment and prevention.  We are learning as we go.  The good news is we ARE learning.  For a data analyst the challenge is the evolving relationship of of all of the disparate data.  Here we have gotten some insight into the duration between a positive test and mortality.  We have clearly seen that mortality has been declining but our model suggests that death will nonetheless surge along with the autumn surge in cases.
+
+There is a wealth of data around behavior and demographics with this disease. Further avenues for modeling might involve demographics and behavior across states.  On the analytics side, we might get more sophisticated with our modeling. We have only scratched the surface of the `tidymodels` framework and we might apply fancier predictive models than linear regression.
+

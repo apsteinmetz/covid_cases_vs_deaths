@@ -29,7 +29,7 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 # Remove tiny territories
 territories <- c("Guam","Northern Mariana Islands")
 us_states_long <- us_states_long %>% filter(!(location %in% territories))
-save(us_states_long,file="data/us_states_long.rdata")
+save(us_states_long,file="us_states_long.rdata")
 us_states_long %>% glimpse()
 ```
 
@@ -81,7 +81,7 @@ us %>%
     axis.title.y.right = element_text(color = "red", size=13)
   ) +
   labs(title =  "U.S. Cases vs. Deaths",
-       caption = "Source: NY Times, Arthur Steinmetz"
+       caption = "Source: NY Times, Arthur Steinmetz",
        x = "Date")
 ```
 We might be tempted to simply regress deaths vs. cases but a scatter plot shows us that would not be satisfactory.  As it turns out, the relationship of cases and deaths is strongly conditioned on date.

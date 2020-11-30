@@ -24,8 +24,10 @@ library(lubridate)
 library(broom)
 
 # source https://github.com/nytimes/covid-19-data.git
-us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
+#us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 
+# use data from November 15 to stay consistent with text narrative
+load("../data/us_states_long.rdata")
 # Remove tiny territories
 territories <- c("Guam","Northern Mariana Islands")
 us_states_long <- us_states_long %>% filter(!(location %in% territories))
@@ -387,11 +389,16 @@ When we have individual case data, we see the average true lead time is 17 days,
 
 ```{r message=FALSE, warning=FALSE}
 # source: https://coronavirus.ohio.gov/static/COVIDSummaryData.csv
-ohio_raw <- read_csv("https://coronavirus.ohio.gov/static/COVIDSummaryData.csv", 
+# new source: https://coronavirus.ohio.gov/static/dashboards/COVIDSummaryData.csv
+ohio_raw <- read_csv("https://coronavirus.ohio.gov/static/dashboards/COVIDSummaryData.csv", 
                      col_types = cols(`Admission Date` = col_date(format = "%m/%d/%Y"), 
                                       `Date Of Death` = col_date(format = "%m/%d/%Y"), 
                                       `Onset Date` = col_date(format = "%m/%d/%Y")))
 
+ohio_raw <- read_csv("../data/OhioCOVIDSummaryData.csv", 
+                     col_types = cols(`Admission Date` = col_date(format = "%m/%d/%Y"), 
+                                      `Date Of Death` = col_date(format = "%m/%d/%Y"), 
+                                      `Onset Date` = col_date(format = "%m/%d/%Y")))
 # helper function to fix column names to best practice
 fix_df_colnames <- function(df){
   names(df)<-names(df) %>% 

@@ -521,8 +521,6 @@ ohio_fatality_rate %>%
        caption = "Source: State of Ohio, Arthur Steinmetz",
        title = "Ohio Fatality Rate as a Percentage of Tracked Cases") +
   scale_y_continuous(labels = scales::percent,breaks = seq(0,0.12,by=.01))
-
-
 ```
 
 The fatality rate in Ohio seems to have been worse than our national model but it is coming down.  Again, this result comes from a different methodology than our proxy model.

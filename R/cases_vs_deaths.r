@@ -6,6 +6,10 @@ library(lubridate)
 library(broom)
 library(knitr)
 
+
+# create rolling average function
+mean_roll_7 <- slidify(mean, .period = 7, .align = "middle")
+
 # source https://github.com/nytimes/covid-19-data.git
 us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 
@@ -30,6 +34,7 @@ us_states_long %>%
 # Create rolling average changes
 # pivot wider
 # this will also be needed when we create lags
+# discard dates before cases were tracked.
 us_states <- us_states_long %>%
   # discard dates before cases were tracked.
   filter(date > as.Date("2020-03-01")) %>%
@@ -39,9 +44,15 @@ us_states <- us_states_long %>%
   mutate(state = as_factor(state)) %>%
   arrange(state, date) %>%
   group_by(state) %>%
-  # smooth the data with 7 day moving average
+  # smooth the data with prior 7 days
   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
-  mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)
+  mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>% 
+  # smooth the data with a centered mean of 7 days
+  mutate(cases_1day = (cases_total - lag(cases_total, 1))) %>%
+  mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>% 
+  mutate(cases_1day = mean_roll_7(cases_1day)) %>%
+  mutate(deaths_1day = mean_roll_7(deaths_1day)) %>% 
+  filter(date < max(date - 3))
 
 # national analysis
 # ----------------------------------------------
@@ -59,7 +70,7 @@ us[10:20, ] %>% kable()
 # does a simple scatterplot tell us anything
 # about the relationship of deaths to cases? No.
 us %>%
-  ggplot(aes(deaths_7day, cases_7day)) +
+  ggplot(aes(deaths_1day, cases_1day)) +
   geom_point() +
   labs(
     title = "Not Useful",
@@ -69,14 +80,14 @@ us %>%
 # visualize the relationship between rolling average of weekly cases and deaths
 coeff <- 30
 us %>%
-  ggplot(aes(date, cases_7day)) +
+  ggplot(aes(date, cases_1day)) +
   geom_line(color = "orange") +
   theme(legend.position = "none") +
-  geom_line(aes(x = date, y = deaths_7day * coeff), color = "red") +
+  geom_line(aes(x = date, y = deaths_1day * coeff), color = "red") +
   scale_y_continuous(
     labels = scales::comma,
     name = "Cases",
-    sec.axis = sec_axis(deaths_7day ~ . / coeff,
+    sec.axis = sec_axis(deaths_1day ~ . / coeff,
       name = "Deaths",
       labels = scales::comma
     )
@@ -92,13 +103,13 @@ us %>%
     x = "Date"
   )
 # passage of time affects deaths more than cases
-lm(deaths_7day ~ cases_7day + date, data = us) %>% tidy()
+lm(deaths_1day ~ cases_1day + date, data = us) %>% tidy()
 
 # create columns for deaths led 0 to 40 days ahead
 max_lead <- 40
 us_lags <- us %>%
   # create lags by day
-  tk_augment_lags(deaths_7day, .lags = 0:-max_lead, .names = "auto")
+  tk_augment_lags(deaths_1day, .lags = 0:-max_lead, .names = "auto")
 # fix names to remove minus sign
 names(us_lags) <- names(us_lags) %>% str_replace_all("lag-|lag", "lead")
 
@@ -115,14 +126,15 @@ models <- us_lags %>%
     names_to = "lead",
     values_to = "led_deaths"
   ) %>%
-  select(date, cases_7day, lead, led_deaths) %>%
-  mutate(lead = as.numeric(str_remove(lead, "deaths_7day_lead"))) %>%
-  nest(data = c(date, cases_7day, led_deaths)) %>%
+  select(date, cases_1day, lead, led_deaths) %>%
+  # make sure string represents correct smoothed column
+  mutate(lead = as.numeric(str_remove(lead, "deaths_1day_lead"))) %>%
+  nest(data = c(date, cases_1day, led_deaths)) %>%
   # Run a regression on lagged cases and date vs deaths
   mutate(model = map(
     data,
     function(df) {
-      lm(led_deaths ~ cases_7day + poly(date, 2), data = df)
+      lm(led_deaths ~ cases_1day + poly(date, 2), data = df)
     }
   ))
 
@@ -155,6 +167,17 @@ best_fit$model[[1]] %>% tidy()
 
 # ------------------------------------------
 # see how well our model predicts
+
+make_predictions <- function(single_model) {
+  predicted_deaths <- predict(single_model$model[[1]], newdata = us)
+  date <- seq.Date(from = min(us$date) + single_model$lead, 
+                   to = max(us$date) + single_model$lead, 
+                   by = 1)
+  display <- full_join(us, tibble(date, predicted_deaths))
+  return(display)
+}
+
+
 # Function to create prediction plot
 show_predictions <- function(single_model, n.ahead) {
   predicted_deaths <- predict(single_model$model[[1]], newdata = us)
@@ -163,7 +186,7 @@ show_predictions <- function(single_model, n.ahead) {
 
   gg <- display %>%
     pivot_longer(cols = where(is.numeric)) %>%
-    filter(name %in% c("deaths_7day", "predicted_deaths")) %>%
+    filter(name %in% c("deaths_1day", "predicted_deaths")) %>%
     ggplot(aes(date, value, color = name)) +
     geom_line() +
     labs(
@@ -178,9 +201,9 @@ show_predictions <- function(single_model, n.ahead) {
 show_predictions(best_fit, best_fit$lead)
 
 fatality <- best_fit$data[[1]] %>%
-  filter(cases_7day > 0) %>%
+  filter(cases_1day > 0) %>%
   filter(date > as.Date("2020-04-15")) %>%
-  mutate(rate = led_deaths / cases_7day)
+  mutate(rate = led_deaths / cases_1day)
 
 fatality %>% ggplot(aes(date, rate)) +
   geom_line() +
@@ -201,15 +224,15 @@ state_subset <- c("New York", "Texas", "California", "Ohio")
 # illustrate selected states
 us_states %>%
   filter(state %in% state_subset) %>%
-  ggplot(aes(date, cases_7day)) +
+  ggplot(aes(date, cases_1day)) +
   geom_line(color = "orange") +
   facet_wrap(~state, scales = "free") +
   theme(legend.position = "none") +
-  geom_line(aes(y = deaths_7day * coeff), color = "red") +
+  geom_line(aes(y = deaths_1day * coeff), color = "red") +
   scale_y_continuous(
     labels = scales::comma,
     name = "Cases",
-    sec.axis = sec_axis(deaths_7day ~ . / coeff,
+    sec.axis = sec_axis(deaths_1day ~ . / coeff,
       name = "Deaths",
       labels = scales::comma
     )
@@ -227,7 +250,7 @@ us_states %>%
 # create lags
 us_states_lags <- us_states %>%
   # create lags by day
-  tk_augment_lags(deaths_7day, .lags = -max_lead:0, .names = "auto") 
+  tk_augment_lags(deaths_1day, .lags = -max_lead:0, .names = "auto") 
 # fix names to remove minus sign
 names(us_states_lags) <- names(us_states_lags) %>% str_replace_all("lag-", "lead")
 
@@ -240,12 +263,12 @@ models_st <- us_states_lags %>%
     names_to = "lead",
     values_to = "led_deaths"
   ) %>%
-  select(state, date, cases_7day, lead, led_deaths) %>%
-  mutate(lead = as.numeric(str_remove(lead, "deaths_7day_lead")))
+  select(state, date, cases_1day, lead, led_deaths) %>%
+  mutate(lead = as.numeric(str_remove(lead, "deaths_1day_lead")))
 
 # make separate tibbles for each regression
 models_st <- models_st %>%
-  nest(data = c(date, cases_7day, led_deaths)) %>%
+  nest(data = c(date, cases_1day, led_deaths)) %>%
   arrange(lead)
 
 # Run a linear regression on lagged cases and date vs deaths
@@ -253,7 +276,7 @@ models_st <- models_st %>%
   mutate(model = map(
     data,
     function(df) {
-      lm(led_deaths ~ cases_7day + poly(date, 2), data = df)
+      lm(led_deaths ~ cases_1day + poly(date, 2), data = df)
     }
   ))
 
@@ -335,9 +358,6 @@ ohio <- ohio_raw %>%
   # data not clean before middle of march
   filter(onset_date >= cutoff_start)
 
-# create rolling average function
-mean_roll_7 <- slidify(mean, .period = 7, .align = "right")
-
 comps <- ohio %>%
   group_by(onset_date) %>%
   summarise(OH = sum(case_count), .groups = "drop") %>%
@@ -346,7 +366,7 @@ comps <- ohio %>%
   mutate(state = "Ohio") %>%
   rename(date = onset_date) %>%
   left_join(us_states, by = c("date", "state")) %>%
-  transmute(date, OH, NYTimes = cases_7day)
+  transmute(date, OH, NYTimes = cases_1day)
 
 comps %>%
   pivot_longer(c("OH", "NYTimes"), names_to = "source", values_to = "count") %>%
@@ -440,3 +460,4 @@ ohio_fatality_rate %>%
     title = "Ohio Fatality Rate as a Percentage of Tracked Cases"
   ) +
   scale_y_continuous(labels = scales::percent, breaks = seq(0, 0.12, by = .01))
+

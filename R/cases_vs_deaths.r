@@ -8,6 +8,11 @@ library(knitr)
 
 
 # create rolling average function
+# while most displays of smoothed COVID data show trailing 7 days,
+# we create rolling averages based on the middle of the time window.
+# this allows us to make predictions based on a specific day rather
+# than the trailing period.  Since these numbers have steep trends
+# the numbers centered on just a few days ago could be very different.
 mean_roll_7 <- slidify(mean, .period = 7, .align = "middle")
 
 # source https://github.com/nytimes/covid-19-data.git
@@ -328,7 +333,7 @@ best_fit_st %>% ggplot(aes(lead)) +
     caption = "Source:NY Times,Arthur Steinmetz"
   )
 
-# ----------------------------------------------------
+# OHIO DATA ----------------------------------------------------
 best_fit_st %>%
   select(-data, -model) %>%
   filter(state == "Ohio") %>%
@@ -358,6 +363,7 @@ ohio <- ohio_raw %>%
   # data not clean before middle of march
   filter(onset_date >= cutoff_start)
 
+# compare ohio data to same NY Times data
 comps <- ohio %>%
   group_by(onset_date) %>%
   summarise(OH = sum(case_count), .groups = "drop") %>%
@@ -382,11 +388,15 @@ comps %>%
 
 
 # aggregate the data to weekly
+# simulate invsibility of data more than test_lag ahead
+test_lag = 30
 ohio <- ohio %>%
   mutate(
     onset_to_death = as.numeric(date_of_death - onset_date),
     onset_year = year(onset_date),
-    onset_week = epiweek(onset_date)
+    onset_week = epiweek(onset_date), 
+    onset_to_death_test = ifelse(onset_date < test_lag,onset_to_death,NA),
+    death_count_test = ifelse(onset_date < test_lag,death_count,0)
   )
 
 
@@ -396,8 +406,13 @@ onset_to_death <- ohio %>%
   summarise(
     death_count_sum = sum(death_count),
     mean_onset_to_death = weighted.mean(onset_to_death,
-      death_count,
-      na.rm = TRUE
+                                        death_count,
+                                        na.rm = TRUE
+    ),
+    death_count_sum_test = sum(death_count_test),
+    mean_onset_to_death_test = weighted.mean(onset_to_death_test,
+                                        death_count,
+                                        na.rm = TRUE
     )
   ) %>%
   mutate(date = as.Date(paste(onset_year, onset_week, 1), "%Y %U %u"))
@@ -410,7 +425,8 @@ onset_to_death %>% ggplot(aes(date, death_count_sum)) +
     subtitle = "Based on Illness Onset Date",
     x = "Date of Illness Onset",
     y = "Deaths"
-  )
+  ) + 
+  geom_col(aes(y=death_count_sum_test),color="red")
 
 # helper function to annotate plots
 pos_index <- function(index_vec, fraction) {
@@ -442,12 +458,14 @@ ohio_fatality_rate <- ohio %>%
   group_by(onset_date) %>%
   summarize(
     case_count = sum(case_count),
-    death_count = sum(death_count), .groups = "drop"
+    death_count = sum(death_count),
+    death_count_test = sum(death_count_test),
+    .groups = "drop"
   ) %>%
   mutate(fatality_rate = death_count / case_count) %>%
-  mutate(fatality_rate_7day = mean_roll_7(fatality_rate)) %>%
-  # filter out most recent cases we we don't know outcome yet
-  filter(onset_date < max(onset_date) - 30)
+  mutate(fatality_rate_7day = mean_roll_7(fatality_rate)) %>% 
+  mutate(fatality_rate_test = death_count_test / case_count) %>%
+  mutate(fatality_rate_7day_test = mean_roll_7(fatality_rate_test))
 
 ohio_fatality_rate %>%
   filter(onset_date > as.Date("2020-04-15")) %>%
@@ -459,5 +477,7 @@ ohio_fatality_rate %>%
     caption = "Source: State of Ohio, Arthur Steinmetz",
     title = "Ohio Fatality Rate as a Percentage of Tracked Cases"
   ) +
-  scale_y_continuous(labels = scales::percent, breaks = seq(0, 0.12, by = .01))
+  scale_y_continuous(labels = scales::percent, breaks = seq(0, 0.12, by = .01)) + 
+  scale_x_date(date_breaks = "month",date_labels = "%b") +
+  geom_line(aes(y= fatality_rate_test),color="red")
 

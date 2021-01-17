@@ -274,7 +274,6 @@ Once we've settled on the appropriate lag time, we can look at the fatality rate
 
 Early on, only people who were very sick or met strict criteria were tested so, of course, fatality rates (on this metric) were much, much higher. To minimize this we start our measure at the middle of April.
 
-Sadly, we see that fatality rates are creeping up again.
 
 ```{r message=FALSE}
 fatality <- best_fit$data[[1]] %>%
@@ -287,7 +286,7 @@ fatality %>% ggplot(aes(date, rate)) +
   geom_smooth() +
   labs(
     x = "Date", y = "Fatality Rate",
-    title = "Fatality Rates are Creeping Up",
+    title = "Fatality Rates are Going Down Again",
     subtitle = "Fatality Rate as a Percentage of Lagged Cases",
     caption = "Source: NY Times, Arthur Steinmetz"
   ) +

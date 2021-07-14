@@ -215,7 +215,7 @@ fatality %>% ggplot(aes(date, rate)) +
   geom_smooth() +
   labs(
     x = "Date", y = "Fatality Rate",
-    title = "Fatality Rates are Creeping Up",
+    title = "Fatality Rates",
     subtitle = "Fatality Rate as a Percentage of Lagged Cases",
     caption = "Source: NY Times, Arthur Steinmetz"
   ) +

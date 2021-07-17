@@ -8,22 +8,37 @@ library(covid19nytimes)
 us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 covid19_df <- refresh_coronavirus_jhu()
 
+# get population by state
+# ------------------------------------
 # https://www.census.gov/data/tables/time-series/demo/popest/2010s-state-total.html#par_textimage
 state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-alldata.csv") %>% 
    transmute(state=NAME,pop=POPESTIMATE2019) %>% 
    right_join(data.frame(state=state.name,state.abb=state.abb))
 
 
-library(readr)
+# get vaccination info
+# ------------------------------------
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
-raw_data <- read_csv("~/R Projects/covid_cases_vs_deaths/data/temp.csv")
-names(raw_data)[1] <- "state"
-vax <- raw_data %>% mutate(state = str_remove(state," State")) %>% 
-   filter(state %in% state.name) %>% 
-   mutate(across(2:ncol(raw_data),as.double))
 
-vax_pct <- vax[,c(1,16)]
-names(vax_pct) <- c("state","pct_full_vax")
+raw_vax <- read_csv("https://data.cdc.gov/api/views/unsk-b7fc/rows.csv?accessType=DOWNLOAD")
+
+# https://www.census.gov/data/tables/time-series/demo/popest/2010s-state-total.html#par_textimage
+state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-alldata.csv") %>% 
+   transmute(state=NAME,pop=POPESTIMATE2019) %>% 
+   right_join(data.frame(state=state.name,state.abb=state.abb))
+
+
+print("Using pct of 12+ population")
+vax_pct <- raw_vax %>% 
+   mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
+   filter(Date == max(Date)) %>% 
+   rename(state.abb = Location,pct_full_vax = Series_Complete_12PlusPop_Pct) %>% 
+   right_join(state_pop) %>% 
+   select(Date,state,state.abb,pct_full_vax) %>% 
+   {.}
+print(max(vax_pct$Date))
+
+# ------------------------------------
 
 us_states <- us_states_long %>%
    # discard dates before cases were tracked.
@@ -56,6 +71,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) +
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Dying",
         subtitle = paste("New Deaths in Week Ending",max(us_states$date)),
+        x = "Percent of Age 12+ Population Unvaccinated",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) + 
@@ -63,6 +79,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
    geom_smooth(method = "gam",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Cases",
+        x = "Percent of Age 12+ Population Unvaccinated",
         subtitle = paste("New Case in Week Ending",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau")
 

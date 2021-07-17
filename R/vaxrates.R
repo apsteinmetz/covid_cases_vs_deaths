@@ -3,6 +3,7 @@
 library(tidyverse)
 library(coronavirus)
 library(covid19nytimes)
+library(RSocrata)
 
 # source https://github.com/nytimes/covid-19-data.git
 us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
@@ -20,7 +21,10 @@ state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-allda
 # ------------------------------------
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
 
-raw_vax <- read_csv("https://data.cdc.gov/api/views/unsk-b7fc/rows.csv?accessType=DOWNLOAD")
+
+raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
+
+#raw_vax <- read_csv("https://data.cdc.gov/api/views/unsk-b7fc/rows.csv?accessType=DOWNLOAD")
 
 # https://www.census.gov/data/tables/time-series/demo/popest/2010s-state-total.html#par_textimage
 state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-alldata.csv") %>% 
@@ -30,13 +34,14 @@ state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-allda
 
 print("Using pct of 12+ population")
 vax_pct <- raw_vax %>% 
-   mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
-   filter(Date == max(Date)) %>% 
-   rename(state.abb = Location,pct_full_vax = Series_Complete_12PlusPop_Pct) %>% 
+   mutate(across(4:ncol(raw_vax),as.double)) %>% 
+   # mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
+   filter(date == max(date)) %>% 
+   rename(state.abb = location,pct_full_vax = series_complete_12pluspop) %>% 
    right_join(state_pop) %>% 
-   select(Date,state,state.abb,pct_full_vax) %>% 
+   select(date,state,state.abb,pct_full_vax) %>% 
    {.}
-print(max(vax_pct$Date))
+print(max(vax_pct$date))
 
 # ------------------------------------
 

@@ -4,7 +4,7 @@ library(tidyverse)
 library(coronavirus)
 library(covid19nytimes)
 library(RSocrata)
-library(hrbrthemes)
+library(ggpubr)
 
 # source https://github.com/nytimes/covid-19-data.git
 us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
@@ -71,6 +71,8 @@ us_states <- us_states_long %>%
    mutate(deaths_per_million=deaths_7day/pop*1000000,cases_per_million=cases_7day/pop*1000000) %>% 
    mutate(deaths_per_million_old=deaths_7day_old/pop*1000000,cases_per_million_old=cases_7day_old/pop*1000000) %>% 
    mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>% 
+   mutate(cases_arrow_color = ifelse(cases_per_million-cases_per_million_old>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
+   mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_old>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
    {.}
    
 
@@ -104,7 +106,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
    geom_segment(aes(x=pct_unvaxed, xend=pct_unvaxed, 
                     y=cases_per_million_old, yend=cases_per_million*0.98), 
                 arrow = arrow(type="closed",angle=10,length = unit(0.2, "inches"),),
-                color="red") +
+                color=vax_effect$cases_arrow_color) +
    geom_smooth(method = "gam",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Cases",
@@ -112,13 +114,28 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
         x = "Percent of Age 12+ Population Unvaccinated",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
-# politics
-vax_effect %>% ggplot(aes(repub_percent_2020,deaths_per_million)) + 
-   #   geom_point() + 
+vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) + 
+   geom_point(aes(y=deaths_per_million_old)) + 
+   geom_segment(aes(x=pct_unvaxed, xend=pct_unvaxed, 
+                    y=deaths_per_million_old, yend=deaths_per_million*0.98), 
+                arrow = arrow(type="closed",angle=10,length = unit(0.2, "inches"),),
+                color=vax_effect$deaths_arrow_color) +
    geom_smooth(method = "gam",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
-   labs(title = "More Republican, More Deaths",
-        x = "Republican Share of Vote in 2020",
-        subtitle = paste("New Deaths in Week Ending",max(us_states$date)),
-        caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report")
+   labs(title = "Fewer Vaxed, More deaths",
+        subtitle = paste("New deaths and Change in New deaths For Week Ending",max(us_states$date)),
+        x = "Percent of Age 12+ Population Unvaccinated",
+        caption = "Sources: Johns Hopkins, CDC, Census Bureau")
+
+# politics
+vax_effect %>% ggplot(aes(repub_percent_2020,pct_unvaxed)) + 
+   #   geom_point() + 
+   geom_smooth(method = "glm",se = FALSE) + 
+   geom_text(aes(label=state.abb)) +
+   labs(title = "More Republican, Less Vaxed",
+        x = "Trump Share of Vote in 2020",
+        y = "Percent of State Unvaccinated",
+        subtitle = paste("As of",max(us_states$date)),
+        caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
+   stat_cor()
 

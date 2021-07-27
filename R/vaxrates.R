@@ -6,6 +6,8 @@ library(covid19nytimes)
 library(RSocrata)
 library(ggpubr)
 
+
+
 # source https://github.com/nytimes/covid-19-data.git
 us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 covid19_df <- refresh_coronavirus_jhu()
@@ -29,28 +31,34 @@ state_pop <- read_csv("~/R Projects/covid_cases_vs_deaths/data/nst-est2019-allda
 # ------------------------------------
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
 
-#raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
+raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
 #write_csv(raw_vax,file="~/R Projects/covid_cases_vs_deaths/data/raw_vax.csv")
 raw_vax <- read_csv("~/R Projects/covid_cases_vs_deaths/data/raw_vax.csv")
 
 # raw_vax <- read_csv("https://data.cdc.gov/api/views/unsk-b7fc/rows.csv?accessType=DOWNLOAD")
 
+# Process data
+# ---------------------------------------------------
+# Days lag to use for changes in values over time
+lag2 = 1 * 7
 
 print("Using pct of 12+ population")
 vax_pct <- raw_vax %>% 
    mutate(across(4:ncol(raw_vax),as.double)) %>% 
+   rename(state.abb = location,pct_full_vax = series_complete_12pluspop) %>% 
+   group_by(state.abb) %>% 
+   arrange(state.abb,date) %>% 
+   mutate(pct_full_vax_old = lag(pct_full_vax,lag2)) %>% 
    # mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
    filter(date == max(date)) %>% 
-   rename(state.abb = location,pct_full_vax = series_complete_12pluspop) %>% 
    right_join(state_pop) %>% 
-   select(state,state.abb,pct_full_vax) %>% 
+   select(state,state.abb,pct_full_vax,pct_full_vax_old) %>% 
+   # select(date,state.abb,pct_full_vax,pct_full_vax_old)
    {.}
 # print(max(vax_pct$date))
 
-# ------------------------------------
 
 # to get change over time use lag2 day ago
-lag2 = 1 * 7
 us_states <- us_states_long %>%
    # discard dates before cases were tracked.
    filter(date > as.Date("2020-03-01")) %>%
@@ -79,8 +87,11 @@ us_states <- us_states_long %>%
 
 vax_effect <- right_join(vax_pct,us_states) %>%
    mutate(pct_unvaxed=100-pct_full_vax) %>% 
+   mutate(pct_unvaxed_old=100-pct_full_vax_old) %>% 
    {.}
 
+# Plot data
+# ---------------------------------------------------
 vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) + 
    #   geom_point() + 
    geom_smooth(method = "gam",se = FALSE) + 
@@ -102,8 +113,8 @@ vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) +
 
 # Deltas
 vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) + 
-   geom_point(aes(y=cases_per_million_old)) + 
-   geom_segment(aes(x=pct_unvaxed, xend=pct_unvaxed, 
+   geom_point(aes(x=pct_unvaxed_old, y=cases_per_million_old)) + 
+   geom_segment(aes(x=pct_unvaxed_old, xend=pct_unvaxed, 
                     y=cases_per_million_old, yend=cases_per_million*0.98), 
                 arrow = arrow(type="closed",angle=10,length = unit(0.2, "inches"),),
                 color=vax_effect$cases_arrow_color) +
@@ -115,8 +126,8 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) + 
-   geom_point(aes(y=deaths_per_million_old)) + 
-   geom_segment(aes(x=pct_unvaxed, xend=pct_unvaxed, 
+   geom_point(aes(x=pct_unvaxed_old,y=deaths_per_million_old)) + 
+   geom_segment(aes(x=pct_unvaxed_old, xend=pct_unvaxed, 
                     y=deaths_per_million_old, yend=deaths_per_million*0.98), 
                 arrow = arrow(type="closed",angle=10,length = unit(0.2, "inches"),),
                 color=vax_effect$deaths_arrow_color) +
@@ -136,6 +147,30 @@ vax_effect %>% ggplot(aes(repub_percent_2020,pct_unvaxed)) +
         x = "Trump Share of Vote in 2020",
         y = "Percent of State Unvaccinated",
         subtitle = paste("As of",max(us_states$date)),
+        caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
+   stat_cor()
+
+vax_effect %>% ggplot(aes(repub_percent_2020,cases_per_million)) + 
+   #   geom_point() + 
+   #geom_smooth(se = FALSE) + 
+   geom_smooth(method = "glm",se = FALSE) + 
+   geom_text(aes(label=state.abb)) +
+   labs(title = "More Republican, More Cases",
+        x = "Trump Share of Vote in 2020",
+        y = "New Daily COVID Cases Per Million Residents",
+        subtitle = paste("7-Day Average As of",max(us_states$date)),
+        caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
+   stat_cor()
+
+vax_effect %>% ggplot(aes(repub_percent_2020,deaths_per_million)) + 
+   #   geom_point() + 
+   #geom_smooth(se = FALSE) + 
+   geom_smooth(method = "glm",se = FALSE) + 
+   geom_text(aes(label=state.abb)) +
+   labs(title = "More Republican, More Deaths",
+        x = "Trump Share of Vote in 2020",
+        y = "Daily COVID Deaths Per Million Residents",
+        subtitle = paste("7-Day Average As of",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
 

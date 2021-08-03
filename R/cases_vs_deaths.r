@@ -334,6 +334,7 @@ best_fit_st %>% ggplot(aes(lead)) +
   )
 
 # OHIO DATA ----------------------------------------------------
+# Ohio stopped reporting in March 2021
 best_fit_st %>%
   select(-data, -model) %>%
   filter(state == "Ohio") %>%

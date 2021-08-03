@@ -51,11 +51,13 @@ county_pop <- read_csv("data/co-est2019-alldata.csv") %>%
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
 
 # by state
+# takes a while so save data
 # raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
 # write_csv(raw_vax,file="data/raw_vax.csv")
 raw_vax <- read_csv("data/raw_vax.csv")
 
 # by county
+# takes a while so save data
 #raw_vax_county <- as_tibble(read.socrata(
 #   "https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct"))
 #write_csv(raw_vax_county,file="data/raw_vax_county.csv")
@@ -73,10 +75,11 @@ vax_pct <- raw_vax %>%
    group_by(state.abb) %>% 
    arrange(state.abb,date) %>% 
    mutate(pct_full_vax_prior = lag(pct_full_vax,lag2)) %>% 
+   mutate(admin_per_100k_prior = lag(admin_per_100k,lag2)) %>% 
    # mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
    filter(date == max(date)) %>% 
    right_join(state_pop) %>% 
-   select(state,state.abb,pct_full_vax,pct_full_vax_prior) %>% 
+   select(state,state.abb,pct_full_vax,pct_full_vax_prior,admin_per_100k,admin_per_100k_prior) %>% 
    # select(date,state.abb,pct_full_vax,pct_full_vax_prior)
    {.}
 # print(max(vax_pct$date))
@@ -135,7 +138,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
    geom_smooth(method = "gam",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Cases",
-        x = "Percent of Age 12+ Population Unvaccinated",
+        x = "Percent of Age 12+ Population  Not Fully Vaxed",
         subtitle = paste("New Case in Week Ending",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau")
 
@@ -145,7 +148,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) +
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Dying",
         subtitle = paste("New Deaths in Week Ending",max(us_states$date)),
-        x = "Percent of Age 12+ Population Unvaccinated",
+        x = "Percent of Age 12+ Population Not Fully Vaxed",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 
@@ -160,7 +163,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) +
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More Cases",
         subtitle = paste("New Cases and Change in New Cases For Week Ending",max(us_states$date)),
-        x = "Percent of Age 12+ Population Unvaccinated",
+        x = "Percent of Age 12+ Population Not Fully Vaxed",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) + 
@@ -173,7 +176,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) +
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More deaths",
         subtitle = paste("New deaths and Change in New deaths For Week Ending",max(us_states$date)),
-        x = "Percent of Age 12+ Population Unvaccinated",
+        x = "Percent of Age 12+ Population Not Fully Vaxed",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 # acceleration in vaccination
@@ -191,16 +194,16 @@ vax_effect %>%
 # are low-vax states getting the message?
 # change in vaccination
 vax_effect %>% 
-   mutate(vax_delta = (pct_full_vax-pct_full_vax_prior)) %>% 
+   mutate(vax_delta = admin_per_100k - admin_per_100k_prior) %>% 
    mutate(covid_delta = (cases_per_million-cases_per_million_prior)) %>% 
    ggplot(aes(covid_delta,vax_delta)) + 
 #   geom_point() + 
    geom_text(aes(label=state.abb)) +
-#   geom_smooth(se=F) +
+   geom_smooth(method = "glm",se=F) +
    labs(title = "Do Surging Cases Encourage Vaccination?",
        subtitle = paste0(lag2,"-Day Change As of ",max(us_states$date)),
-                y="Percentage Change in Vaxed Pop.",
-        x = "Percentage Change in Cases",
+                y="Change In Doses Given per 100k Pop.",
+        x = "Change in Cases Per Million Pop.",
        caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
 # POLITICS
@@ -213,7 +216,7 @@ vax_politics %>%
    geom_text(aes(label=state.abb)) +
    labs(title = "More Republican, Less Vaxed",
         x = "Trump Share of Vote in 2020",
-        y = "Percent of State Unvaccinated",
+        y = "Percent of State Not Fully Vaxed",
         subtitle = paste("As of",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
@@ -264,7 +267,7 @@ vax_politics_county %>%
    geom_point() +
    labs(title = "More Republican, Less Vaxed",
         x = "Trump Share of Vote in 2020",
-        y = "Percent of County Unvaccinated",
+        y = "Percent of County Not Fully Vaxed",
         subtitle = paste("As of",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, MIT") +
    stat_cor()

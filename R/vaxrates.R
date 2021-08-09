@@ -206,6 +206,7 @@ vax_effect %>%
         x = "Change in Cases Per Million Pop.",
        caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
+# ------------------------------------------------------------
 # POLITICS
 vax_politics <- vax_effect %>%
    left_join(PopVote2020)

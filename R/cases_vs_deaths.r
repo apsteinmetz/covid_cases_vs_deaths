@@ -25,6 +25,9 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 cutoff_start <- as.Date("2020-03-15") # not widespread enough until then
 cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
 
+# use data since vaccines became available
+cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
+
 us_states_long <- us_states_long %>% filter(date >= cutoff_start)
 us_states_long <- us_states_long %>% filter(date <= cutoff_end)
 # Remove tiny territories
@@ -333,7 +336,7 @@ best_fit_st %>% ggplot(aes(lead)) +
     caption = "Source:NY Times,Arthur Steinmetz"
   )
 
-# OHIO DATA ----------------------------------------------------
+s# OHIO DATA ----------------------------------------------------
 # Ohio stopped reporting in March 2021
 best_fit_st %>%
   select(-data, -model) %>%

@@ -22,11 +22,11 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 # load("../data/us_states_long.rdata")
 
 # use data from November 15 to stay consistent with text narrative
-cutoff_start <- as.Date("2020-03-15") # not widespread enough until then
+cutoff_start <- as.Date("2020-09-15") 
 cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
 
 # use data since vaccines became available
-cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
+# cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
 
 us_states_long <- us_states_long %>% filter(date >= cutoff_start)
 us_states_long <- us_states_long %>% filter(date <= cutoff_end)

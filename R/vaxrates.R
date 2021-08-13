@@ -52,13 +52,13 @@ county_pop <- read_csv("data/co-est2019-alldata.csv") %>%
 
 # by state
 # takes a while so save data
-# raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
-# write_csv(raw_vax,file="data/raw_vax.csv")
+ raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
+ write_csv(raw_vax,file="data/raw_vax.csv")
 raw_vax <- read_csv("data/raw_vax.csv")
 
 # by county
 # takes a while so save data
-#raw_vax_county <- as_tibble(read.socrata(
+# raw_vax_county <- as_tibble(read.socrata(
 #   "https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct"))
 #write_csv(raw_vax_county,file="data/raw_vax_county.csv")
 raw_vax_county <- read_csv("data/raw_vax_county.csv")
@@ -175,7 +175,7 @@ vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) +
    geom_smooth(method = "gam",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "Fewer Vaxed, More deaths",
-        subtitle = paste("New deaths and Change in New deaths For Week Ending",max(us_states$date)),
+        subtitle = paste("New Deaths and Change in New deaths For 2 Weeks Ending",max(us_states$date)),
         x = "Percent of Age 12+ Population Not Fully Vaxed",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 

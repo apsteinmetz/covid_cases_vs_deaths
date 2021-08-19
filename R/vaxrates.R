@@ -122,8 +122,8 @@ us_states <- us_states_long %>%
    mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
    {.}
    
-# oops bad data for delaware on july 31 so take it out for now
-us_states <- us_states %>% filter(state != "Delaware")
+# oops bad data for Idaho so take it out for now
+us_states <- us_states %>% filter(state != "Idaho")
 
 vax_effect <- right_join(vax_pct,us_states) %>%
    mutate(pct_unvaxed=100-pct_full_vax) %>% 

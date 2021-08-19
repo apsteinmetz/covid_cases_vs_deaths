@@ -5,7 +5,6 @@ library(coronavirus)
 library(covid19nytimes)
 library(RSocrata)
 library(ggpubr)
-library(readr)
 
 
 
@@ -58,9 +57,10 @@ raw_vax <- read_csv("data/raw_vax.csv")
 
 # by county
 # takes a while so save data
-# raw_vax_county <- as_tibble(read.socrata(
-#   "https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct"))
-#write_csv(raw_vax_county,file="data/raw_vax_county.csv")
+raw_vax_county <- as_tibble(
+   read.socrata("https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct")
+   )
+write_csv(raw_vax_county,file="data/raw_vax_county.csv")
 raw_vax_county <- read_csv("data/raw_vax_county.csv")
 
 # Process data

@@ -21,7 +21,7 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 # if link is broken
 # load("../data/us_states_long.rdata")
 
-cutoff_start <- as.Date("2020-03-15") 
+cutoff_start <- as.Date("2020-09-15") 
 cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
 
 # use data since vaccines became available
@@ -141,7 +141,9 @@ models <- us_lags %>%
   mutate(model = map(
     data,
     function(df) {
-      lm(led_deaths ~ cases_1day + poly(date, 2), data = df)
+#      lm(led_deaths ~ cases_1day + poly(date, 2), data = df)
+      # Alt Model
+      lm(led_deaths ~ cases_1day, data = df)
     }
   ))
 
@@ -334,10 +336,26 @@ best_fit_st %>% ggplot(aes(lead)) +
 
 # Make state predictions
 # show states with largest predicted increase in deaths over national lead period
-target_state = "New Jersey"
+target_state = "New York"
 fit_state = best_fit_st %>% filter(state == target_state)
 
 show_predictions(fit_state$data[[1]],fit_state)
+make_predictions(fit_state$data[[1]],fit_state)
+
+recent_state <- us_states %>% group_by(state) %>% 
+  filter(date == max(date)) %>% 
+  select(date,state,cases_1day,deaths_1day) %>% 
+  {.}
+
+
+recent_state <- recent_state %>% 
+  full_join(tibble(state=recent_state$state,
+                   future_date = recent_state$date[1] + best_fit$lead[[1]],
+                   predicted_deaths = predict(best_fit$model[[1]],
+                                              n.ahead=best_fit$lead[[1]],
+                                              newdata = recent_state))) %>% 
+  mutate(pred_change = predicted_deaths - deaths_1day,
+         pred_pct_change = predicted_deaths/deaths_1day-1)
 
 # OHIO DATA ----------------------------------------------------
 # NOTE: Ohio stopped reporting in March 2021

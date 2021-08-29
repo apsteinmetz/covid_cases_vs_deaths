@@ -21,8 +21,7 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 # if link is broken
 # load("../data/us_states_long.rdata")
 
-# use data from November 15 to stay consistent with text narrative
-cutoff_start <- as.Date("2020-09-15") 
+cutoff_start <- as.Date("2020-03-15") 
 cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
 
 # use data since vaccines became available
@@ -175,23 +174,19 @@ best_fit$model[[1]] %>% tidy()
 
 # ------------------------------------------
 # see how well our model predicts
-
-make_predictions <- function(single_model) {
-  predicted_deaths <- predict(single_model$model[[1]], newdata = us)
-  date <- seq.Date(from = min(us$date) + single_model$lead, 
-                   to = max(us$date) + single_model$lead, 
+make_predictions <- function(newdata,single_model){
+  predicted_deaths <- predict(single_model$model[[1]], newdata = newdata)
+  date <- seq.Date(from = min(newdata$date + single_model$lead),
+                   to = max(newdata$date) + single_model$lead, 
                    by = 1)
-  display <- full_join(us, tibble(date, predicted_deaths))
+  display <- full_join(newdata, tibble(date, predicted_deaths))
   return(display)
 }
 
 
 # Function to create prediction plot
-show_predictions <- function(single_model, n.ahead) {
-  predicted_deaths <- predict(single_model$model[[1]], newdata = us)
-  date <- seq.Date(from = min(us$date) + n.ahead, to = max(us$date) + n.ahead, by = 1)
-  display <- full_join(us, tibble(date, predicted_deaths))
-
+show_predictions <- function(newdata,model) {
+  display <- make_predictions(newdata,model)
   gg <- display %>%
     pivot_longer(cols = where(is.numeric)) %>%
     filter(name %in% c("deaths_1day", "predicted_deaths")) %>%
@@ -206,7 +201,8 @@ show_predictions <- function(single_model, n.ahead) {
   gg
 }
 
-show_predictions(best_fit, best_fit$lead)
+show_predictions(us,best_fit)
+
 
 fatality <- best_fit$data[[1]] %>%
   filter(cases_1day > 0) %>%
@@ -271,12 +267,12 @@ models_st <- us_states_lags %>%
     names_to = "lead",
     values_to = "led_deaths"
   ) %>%
-  select(state, date, cases_1day, lead, led_deaths) %>%
+  select(state, date, cases_1day, deaths_1day,lead, led_deaths) %>%
   mutate(lead = as.numeric(str_remove(lead, "deaths_1day_lead")))
 
 # make separate tibbles for each regression
 models_st <- models_st %>%
-  nest(data = c(date, cases_1day, led_deaths)) %>%
+  nest(data = c(date, cases_1day, deaths_1day,led_deaths)) %>%
   arrange(lead)
 
 # Run a linear regression on lagged cases and date vs deaths
@@ -336,8 +332,15 @@ best_fit_st %>% ggplot(aes(lead)) +
     caption = "Source:NY Times,Arthur Steinmetz"
   )
 
-s# OHIO DATA ----------------------------------------------------
-# Ohio stopped reporting in March 2021
+# Make state predictions
+# show states with largest predicted increase in deaths over national lead period
+target_state = "New Jersey"
+fit_state = best_fit_st %>% filter(state == target_state)
+
+show_predictions(fit_state$data[[1]],fit_state)
+
+# OHIO DATA ----------------------------------------------------
+# NOTE: Ohio stopped reporting in March 2021
 best_fit_st %>%
   select(-data, -model) %>%
   filter(state == "Ohio") %>%

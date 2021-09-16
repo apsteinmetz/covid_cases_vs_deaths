@@ -6,13 +6,6 @@ library(covid19nytimes)
 library(RSocrata)
 library(ggpubr)
 
-
-
-# source https://github.com/nytimes/covid-19-data.git
-us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
-covid19_df <- refresh_coronavirus_jhu()
-
-
 # get 2020 prez vote totals
 # ----------------------------------
 # https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/VOQCHQ
@@ -49,25 +42,37 @@ county_pop <- read_csv("data/co-est2019-alldata.csv") %>%
 # ------------------------------------
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
 
-# by state
-# takes a while so save data
-raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
-write_csv(raw_vax,file="data/raw_vax.csv")
+REFRESH_VAX_DATA <- FALSE
+
+if (REFRESH_VAX_DATA){
+   # source https://github.com/nytimes/covid-19-data.git
+   us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
+   us_counties_long <- covid19nytimes::refresh_covid19nytimes_counties()
+   
+   covid19_df <- refresh_coronavirus_jhu()
+
+      # by state
+   # takes a while so save data
+   raw_vax <- as_tibble(read.socrata("https://data.cdc.gov/resource/unsk-b7fc.json"))
+   write_csv(raw_vax,file="data/raw_vax.csv")
+   
+   # by county
+   # takes a while so save data
+   raw_vax_county <- 
+      as_tibble(
+         read.socrata("https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, fips, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct")
+      )
+   write_csv(raw_vax_county,file="data/raw_vax_county.csv")
+}
+
 raw_vax <- read_csv("data/raw_vax.csv")
+raw_vax_county <- read_csv("data/raw_vax_county.csv")
 
-# by county
-# takes a while so save data
-#raw_vax_county <- as_tibble(
-#   read.socrata("https://data.cdc.gov/resource/8xkx-amqh.json?$select=date, recip_county, recip_state, series_complete_12pluspop, series_complete_pop_pct")
-)
-#write_csv(raw_vax_county,file="data/raw_vax_county.csv")
-#raw_vax_county <- read_csv("data/raw_vax_county.csv")
-
-# Process data
-# ---------------------------------------------------
 # Days lag to use for changes in values over time
 lag2 = 2 * 7
 
+# ---------------------------------------------------
+# Process data
 print("Using pct of 12+ population")
 vax_pct <- raw_vax %>% 
    mutate(across(4:ncol(raw_vax),as.double)) %>% 
@@ -86,15 +91,15 @@ vax_pct <- raw_vax %>%
 
 vax_pct_county <- raw_vax_county %>% 
    rename(state.abb = recip_state,county = recip_county,pct_full_vax = series_complete_12pluspop) %>% 
+   mutate(pct_full_vax = as.numeric(pct_full_vax)) %>% 
    mutate(county = str_remove(county," County| Parish")) %>% 
-   group_by(state.abb,county) %>% 
-   arrange(state.abb,date) %>% 
+   group_by(fips,state.abb,county) %>% 
+   arrange(state.abb,fips,date) %>% 
    mutate(pct_full_vax_prior = lag(pct_full_vax,lag2)) %>% 
    # mutate(Date = as.Date(Date,format="%m/%d/%Y")) %>% 
    filter(date == max(date)) %>% 
-   right_join(state_pop) %>% 
-   select(state,state.abb,pct_full_vax,pct_full_vax_prior) %>% 
-   # select(date,state.abb,pct_full_vax,pct_full_vax_prior)
+   right_join(county_pop) %>% 
+   select(fips,state,state.abb,pct_full_vax,pct_full_vax_prior) %>% 
    {.}
 
 # to get change over time use lag2 day ago
@@ -122,16 +127,48 @@ us_states <- us_states_long %>%
    mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
    {.}
 
-# oops bad data for Idaho so take it out for now
-us_states <- us_states %>% filter(state != "Idaho")
-
-vax_effect <- right_join(vax_pct,us_states) %>%
-   mutate(pct_unvaxed=100-pct_full_vax) %>% 
-   mutate(pct_unvaxed_prior=100-pct_full_vax_prior) %>% 
+us_counties <- us_counties_long %>%
+   # discard dates before cases were tracked.
+   filter(date > as.Date("2020-03-01")) %>%
+   pivot_wider(names_from = "data_type", values_from = "value") %>%
+   rename(fips = location_code) %>%
+   separate(location,into = c("county","state"),sep=",") %>% 
+   select(date, fips,state, county, cases_total, deaths_total) %>%
+   mutate(state = as_factor(state)) %>%
+   arrange(fips, date) %>%
+   group_by(state,county) %>%
+   # smooth the data with prior 7 days
+   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
+   mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>%
+   mutate(cases_7day_prior = (lag(cases_total, lag2)-lag(cases_total, lag2+7)) / 7) %>%
+   mutate(deaths_7day_prior = (lag(deaths_total, lag2)-lag(deaths_total, lag2+7)) / 7)%>%
+   mutate(deaths_last90 = deaths_total-lag(deaths_total,90)) %>%
+   filter(date == max(date)) %>%
+   right_join(county_pop) %>%
+   mutate(deaths_per_million=deaths_7day/pop*1000000,cases_per_million=cases_7day/pop*1000000) %>%
+   mutate(deaths_per_million_prior=deaths_7day_prior/pop*1000000,cases_per_million_prior=cases_7day_prior/pop*1000000) %>%
+   mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>%
+   mutate(cases_arrow_color = ifelse(cases_per_million-cases_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
+   mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
+   remove_missing() %>% 
    {.}
 
+# oops bad data for Idaho so take it out for now
+ us_states <- us_states %>% filter(state != "Idaho")
 
-# Plot data
+ vax_effect <- right_join(vax_pct,us_states) %>%
+    mutate(pct_unvaxed=100-pct_full_vax) %>% 
+    mutate(pct_unvaxed_prior=100-pct_full_vax_prior) %>% 
+    {.}
+ vax_effect_county <- right_join(vax_pct_county,us_counties) %>%
+    mutate(pct_unvaxed=100-pct_full_vax) %>% 
+    mutate(pct_unvaxed_prior=100-pct_full_vax_prior) %>% 
+    #remove bad data
+    filter(pct_unvaxed != 100,pct_unvaxed != 0,deaths_per_million >= 0) %>% 
+    {.}
+ 
+
+# Plot data by State
 # ---------------------------------------------------
 vax_effect %>% ggplot(aes(pct_unvaxed,cases_per_million)) + 
    #   geom_point() + 
@@ -207,10 +244,11 @@ vax_effect %>%
         x = "Change in Cases Per Million Pop.",
         caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 
-# ------------------------------------------------------------
+# --------------------------------
 # POLITICS
 vax_politics <- vax_effect %>%
    left_join(PopVote2020)
+
 vax_politics %>% 
    ggplot(aes(repub_percent_2020,pct_unvaxed)) + 
    #   geom_point() + 
@@ -249,30 +287,57 @@ vax_politics %>%
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
 
+# ---------------------------------------------------
+# Plot data by County
+
+STATE_CODE <- "CA"
+vax_effect_county %>% 
+   filter(state.abb == STATE_CODE) %>% 
+   ggplot(aes(pct_unvaxed,cases_per_million)) + 
+   #   geom_point() + 
+   geom_smooth(method = "gam",se = FALSE) + 
+   geom_text(aes(label=county)) +
+#   geom_point()+
+   labs(title = "Fewer Vaxed, More Cases",
+        x = "Percent of Age 12+ Population  Not Fully Vaxed",
+        subtitle = paste(STATE_CODE,"New Case in Week Ending",max(us_states$date)),
+        caption = "Sources: Johns Hopkins, CDC. Census Bureau")
+
+
+vax_effect_county %>% 
+   filter(state.abb == STATE_CODE) %>% 
+   ggplot(aes(pct_unvaxed,deaths_per_million)) + 
+   geom_smooth(method = "gam",se = FALSE) + 
+#   geom_text(aes(label=state.abb)) +
+   geom_text(aes(label=county)) +
+   #   geom_point()+
+   labs(title = "More Vaxed, Less Dying",
+        subtitle = paste(STATE_CODE," New Deaths in Two Weeks Ending",max(us_states$date)),
+        x = "Percent of Age 12+ Population Not Fully Vaxed",
+        y = "Deaths per Million Residents",
+        caption = "Sources: Johns Hopkins, CDC, Census Bureau")
+
+
+
+
+
 #POLITICS BY COUNTY
 
-# not working
-vax_politics_county <- PopVote2020_county %>% 
-   right_join(vax_pct_county) %>%
-   right_join(county_pop) %>% 
-   filter(pct_full_vax > 0) %>% 
-   mutate(pct_unvaxed = 100-pct_full_vax) %>% 
-   # remove tiny counties
-   filter(pop > 10000) %>% 
-   #"City" "Borough" "District" etc. don't agree across voting and vaxing so pull out
-   remove_missing()
+vax_politics_county <- vax_effect_county %>%
+   left_join(PopVote2020_county)
+
 
 vax_politics_county %>% 
-   ggplot(aes(repub_percent_2020,pct_unvaxed)) + 
-   #   geom_point() + 
+   filter(state.abb == STATE_CODE) %>% 
+   ggplot(aes(repub_percent_2020,deaths_per_million)) + 
    geom_smooth(method = "glm",se = FALSE) + 
-   geom_point() +
-   labs(title = "More Republican, Less Vaxed",
+   geom_text(aes(label=county)) +
+#   geom_point() +
+   scale_x_continuous(labels = scales::percent) + 
+   labs(title = "More Republican, More Deaths",
+        subtitle = paste(STATE_CODE," Counties Daily Average, Last 14 Days as of",max(us_states$date)),
         x = "Trump Share of Vote in 2020",
-        y = "Percent of County Not Fully Vaxed",
-        subtitle = paste("As of",max(us_states$date)),
-        caption = "Sources: Johns Hopkins, CDC. Census Bureau, MIT") +
+        y = "Daily COVID Deaths Per Million Residents",
+        caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
-
-
 

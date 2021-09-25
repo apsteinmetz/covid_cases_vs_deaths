@@ -272,15 +272,15 @@ vax_politics %>%
    stat_cor()
 
 vax_politics %>% 
-   ggplot(aes(repub_percent_2020,cases_per_million)) + 
+   ggplot(aes(repub_percent_2020,cases_per_million_since_vax)) + 
    #   geom_point() + 
-   #geom_smooth(se = FALSE) + 
+   # geom_smooth(se = FALSE) + 
    geom_smooth(method = "glm",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "More Republican, More Cases",
         x = "Trump Share of Vote in 2020",
-        y = "New Daily COVID Cases Per Million Residents",
-        subtitle = paste("7-Day Average As of",max(us_states$date)),
+        y = "COVID Deaths Per Million Residents",
+        subtitle = paste("Deaths between 2021-05-16 and",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
 
@@ -292,8 +292,8 @@ vax_politics %>%
    geom_text(aes(label=state.abb)) +
    labs(title = "More Republican, More Deaths",
         x = "Trump Share of Vote in 2020",
-        y = "COVID Deaths Per Million Residents Since May 16 2021",
-        subtitle = paste("7-Day Average As of",max(us_states$date)),
+        y = "COVID Deaths Per Million Residents",
+        subtitle = paste("Deaths between 2021-05-16 and",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()
 

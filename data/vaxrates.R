@@ -42,14 +42,16 @@ county_pop <- read_csv("data/co-est2019-alldata.csv") %>%
 # ------------------------------------
 # https://covid.cdc.gov/covid-data-tracker/#vaccinations
 
+
 REFRESH_VAX_DATA <- FALSE
+
+us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
+us_counties_long <- covid19nytimes::refresh_covid19nytimes_counties()
+
+covid19_df <- refresh_coronavirus_jhu()
 
 if (REFRESH_VAX_DATA){
    # source https://github.com/nytimes/covid-19-data.git
-   us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
-   us_counties_long <- covid19nytimes::refresh_covid19nytimes_counties()
-   
-   covid19_df <- refresh_coronavirus_jhu()
 
       # by state
    # takes a while so save data
@@ -69,7 +71,9 @@ raw_vax <- read_csv("data/raw_vax.csv")
 raw_vax_county <- read_csv("data/raw_vax_county.csv")
 
 # Days lag to use for changes in values over time
-lag2 = 2 * 7
+lag2 = 7
+# how long since first shots were effective
+lag_since_vax = as.integer(max(us_states_long$date) -  as.Date("2021-05-16"))
 
 # ---------------------------------------------------
 # Process data
@@ -90,6 +94,7 @@ vax_pct <- raw_vax %>%
 # print(max(vax_pct$date))
 
 vax_pct_county <- raw_vax_county %>% 
+   lazy_dt() %>% 
    rename(state.abb = recip_state,county = recip_county,pct_full_vax = series_complete_12pluspop) %>% 
    mutate(pct_full_vax = as.numeric(pct_full_vax)) %>% 
    mutate(county = str_remove(county," County| Parish")) %>% 
@@ -100,6 +105,7 @@ vax_pct_county <- raw_vax_county %>%
    filter(date == max(date)) %>% 
    right_join(county_pop) %>% 
    select(fips,state,state.abb,pct_full_vax,pct_full_vax_prior) %>% 
+   as_tibble() %>% 
    {.}
 
 # to get change over time use lag2 day ago
@@ -118,8 +124,10 @@ us_states <- us_states_long %>%
    mutate(cases_7day_prior = (lag(cases_total, lag2)-lag(cases_total, lag2+7)) / 7) %>%
    mutate(deaths_7day_prior = (lag(deaths_total, lag2)-lag(deaths_total, lag2+7)) / 7)%>% 
    mutate(deaths_last90 = deaths_total-lag(deaths_total,90)) %>% 
-   filter(date == max(date)) %>% 
    right_join(state_pop) %>% 
+   mutate(deaths_per_million_since_vax=(deaths_total-lag(deaths_total,lag_since_vax)) / pop* 1000000) %>% 
+   mutate(cases_per_million_since_vax=(cases_total-lag(cases_total,lag_since_vax))/ pop* 1000000) %>% 
+   filter(date == max(date)) %>% 
    mutate(deaths_per_million=deaths_7day/pop*1000000,cases_per_million=cases_7day/pop*1000000) %>% 
    mutate(deaths_per_million_prior=deaths_7day_prior/pop*1000000,cases_per_million_prior=cases_7day_prior/pop*1000000) %>% 
    mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>% 
@@ -128,11 +136,12 @@ us_states <- us_states_long %>%
    {.}
 
 us_counties <- us_counties_long %>%
-   # discard dates before cases were tracked.
    filter(date > as.Date("2020-03-01")) %>%
    pivot_wider(names_from = "data_type", values_from = "value") %>%
-   rename(fips = location_code) %>%
    separate(location,into = c("county","state"),sep=",") %>% 
+   lazy_dt() %>% 
+   # discard dates before cases were tracked.
+   rename(fips = location_code) %>%
    select(date, fips,state, county, cases_total, deaths_total) %>%
    mutate(state = as_factor(state)) %>%
    arrange(fips, date) %>%
@@ -150,10 +159,11 @@ us_counties <- us_counties_long %>%
    mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>%
    mutate(cases_arrow_color = ifelse(cases_per_million-cases_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
    mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
+   as_tibble() %>% 
    remove_missing() %>% 
    {.}
 
-# oops bad data for Idaho so take it out for now
+# oops. bad data for Idaho so take it out for now
  us_states <- us_states %>% filter(state != "Idaho")
 
  vax_effect <- right_join(vax_pct,us_states) %>%
@@ -275,14 +285,14 @@ vax_politics %>%
    stat_cor()
 
 vax_politics %>% 
-   ggplot(aes(repub_percent_2020,deaths_per_million)) + 
+   ggplot(aes(repub_percent_2020,deaths_per_million_since_vax)) + 
    #   geom_point() + 
    # geom_smooth(se = FALSE) + 
    geom_smooth(method = "glm",se = FALSE) + 
    geom_text(aes(label=state.abb)) +
    labs(title = "More Republican, More Deaths",
         x = "Trump Share of Vote in 2020",
-        y = "Daily COVID Deaths Per Million Residents",
+        y = "COVID Deaths Per Million Residents Since May 16 2021",
         subtitle = paste("7-Day Average As of",max(us_states$date)),
         caption = "Sources: Johns Hopkins, CDC. Census Bureau, Cook Political Report") +
    stat_cor()

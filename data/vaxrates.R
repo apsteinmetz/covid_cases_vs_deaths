@@ -135,33 +135,43 @@ us_states <- us_states_long %>%
    mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
    {.}
 
-us_counties <- us_counties_long %>%
-   filter(date > as.Date("2020-03-01")) %>%
-   pivot_wider(names_from = "data_type", values_from = "value") %>%
-   separate(location,into = c("county","state"),sep=",") %>% 
-   lazy_dt() %>% 
-   # discard dates before cases were tracked.
-   rename(fips = location_code) %>%
-   select(date, fips,state, county, cases_total, deaths_total) %>%
-   mutate(state = as_factor(state)) %>%
-   arrange(fips, date) %>%
-   group_by(state,county) %>%
-   # smooth the data with prior 7 days
-   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
-   mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>%
-   mutate(cases_7day_prior = (lag(cases_total, lag2)-lag(cases_total, lag2+7)) / 7) %>%
-   mutate(deaths_7day_prior = (lag(deaths_total, lag2)-lag(deaths_total, lag2+7)) / 7)%>%
-   mutate(deaths_last90 = deaths_total-lag(deaths_total,90)) %>%
-   filter(date == max(date)) %>%
-   right_join(county_pop) %>%
-   mutate(deaths_per_million=deaths_7day/pop*1000000,cases_per_million=cases_7day/pop*1000000) %>%
-   mutate(deaths_per_million_prior=deaths_7day_prior/pop*1000000,cases_per_million_prior=cases_7day_prior/pop*1000000) %>%
-   mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>%
-   mutate(cases_arrow_color = ifelse(cases_per_million-cases_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
-   mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>%
-   as_tibble() %>% 
-   remove_missing() %>% 
-   {.}
+us_counties_long_test <- us_counties_long %>% 
+   filter(str_detect(location,",New York"))
+
+system.time(
+   us_counties <- 
+      us_counties_long %>%
+      # discard dates before cases were tracked.
+      filter(date > as.Date("2020-03-01")) %>%
+      pivot_wider(names_from = "data_type", values_from = "value") %>%
+      # separate(location,into = c("county","state",sep=",")) %>% 
+      lazy_dt() %>% 
+      # mutates are much faster than separate
+      mutate(county = str_remove(str_extract(location,".+,"),",")) %>% 
+      mutate(state =  str_remove(str_extract(location,",.+"),",")) %>% 
+      select(date, state,county, cases_total, deaths_total) %>%
+      arrange(state, county,date) %>%
+      group_by(state,county) %>%
+      # # smooth the data with prior 7 days
+      mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
+      mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>% 
+      mutate(cases_7day_prior = (lag(cases_total, lag2)-lag(cases_total, lag2+7)) / 7) %>%
+      mutate(deaths_7day_prior = (lag(deaths_total, lag2)-lag(deaths_total, lag2+7)) / 7)%>%
+      mutate(deaths_last90 = deaths_total-lag(deaths_total,90)) %>%
+      right_join(state_pop) %>%
+      mutate(deaths_per_million_since_vax=(deaths_total-lag(deaths_total,lag_since_vax)) / pop* 1000000) %>%
+      mutate(cases_per_million_since_vax=(cases_total-lag(cases_total,lag_since_vax))/ pop* 1000000) %>%
+      filter(date == max(date)) %>%
+      mutate(deaths_per_million=deaths_7day/pop*1000000,cases_per_million=cases_7day/pop*1000000) %>% 
+      mutate(deaths_per_million_prior=deaths_7day_prior/pop*1000000,cases_per_million_prior=cases_7day_prior/pop*1000000) %>% 
+      mutate(deaths_last90_per_million=deaths_last90/pop*1000000) %>% 
+      mutate(state = as_factor(state)) %>%
+      as_tibble() %>% 
+      mutate(cases_arrow_color = ifelse(cases_per_million-cases_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
+      mutate(deaths_arrow_color = ifelse(deaths_per_million-deaths_per_million_prior>0,"red",rgb(0.2,0.7,0.1,0.5))) %>% 
+      remove_missing() %>% 
+      {.}
+)
 
 # oops. bad data for Idaho so take it out for now
  us_states <- us_states %>% filter(state != "Idaho")

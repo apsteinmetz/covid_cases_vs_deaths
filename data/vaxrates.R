@@ -4,9 +4,8 @@ library(tidyverse)
 library(coronavirus)
 library(covid19nytimes)
 library(RSocrata)
-library(ggpubr)
 
-# get 2020 prez vote totals
+# get 2020 presidential vote totals
 # ----------------------------------
 # https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/VOQCHQ
 PopVote2020 <- read_csv("data/PopVote2020.csv") %>% 

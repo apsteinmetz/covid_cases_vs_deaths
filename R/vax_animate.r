@@ -102,7 +102,7 @@ vax_effect_wk <- vax_effect %>%
 # Plot data
 # ---------------------------------------------------
 p <- vax_effect_wk %>% 
-  ggplot(aes(pct_unvaxed,cases_per_million,color=state,size=cases_total)) + 
+  ggplot(aes(pct_full_vax,cases_per_million,color=state)) + 
   #   geom_point() + 
   # geom_smooth(method = "gam",se = FALSE) + 
   geom_text(aes(label=state.abb)) +
@@ -110,8 +110,8 @@ p <- vax_effect_wk %>%
   scale_y_continuous(limits = c(0,1250)) +
   theme(legend.position = "none") +
   labs(title = "Fewer Vaxed, More Cases",
-       x = "Percent of Age 12+ Population  Not Fully Vaxed",
-       subtitle = paste("New Case in Week Ending",max(us_states$date)),
+       x = "Percent of Age 12+ Population Fully Vaxed",
+       subtitle = paste("Average Daily New Cases in Week Ending",max(us_states$date)),
        caption = "Sources: Johns Hopkins, CDC. Census Bureau")
 
 p
@@ -124,12 +124,12 @@ anim <- p +
   
 anim
   
-vax_effect %>% ggplot(aes(pct_unvaxed,deaths_per_million)) + 
+p <- vax_effect %>% ggplot(aes(pct_full_vax,deaths_per_million)) + 
   geom_smooth(method = "gam",se = FALSE) + 
   geom_text(aes(label=state.abb)) +
   labs(title = "More Vaxed, Less Dying",
-       subtitle = paste("New Deaths in Two Weeks Ending",max(us_states$date)),
-       x = "Percent of Age 12+ Population Not Fully Vaxed",
+       subtitle = paste("Average Daily Deaths in Week Ending",max(us_states$date)),
+       x = "Percent of Age 12+ Population Fully Vaxed",
        y = "Deaths per Million Residents",
        caption = "Sources: Johns Hopkins, CDC, Census Bureau")
 

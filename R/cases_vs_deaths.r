@@ -22,7 +22,8 @@ us_states_long <- covid19nytimes::refresh_covid19nytimes_states()
 # load("../data/us_states_long.rdata")
 
 cutoff_start <- as.Date("2020-09-15") 
-cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
+# cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
+cutoff_end <- max(us_states_long$date)
 
 # use data since vaccines became available
 # cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
@@ -59,7 +60,8 @@ us_states <- us_states_long %>%
   mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>% 
   mutate(cases_1day = mean_roll_7(cases_1day)) %>%
   mutate(deaths_1day = mean_roll_7(deaths_1day)) %>% 
-  filter(date < max(date - 3))
+  # filter(date < max(date - 3)) %>% 
+  {.}
 
 # national analysis
 # ----------------------------------------------

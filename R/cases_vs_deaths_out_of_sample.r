@@ -21,17 +21,15 @@ us_states_long_raw <- covid19nytimes::refresh_covid19nytimes_states()
 # if link is broken
 # load("../data/us_states_long.rdata")
 
-cutoff_start <- as.Date("2020-06-15") 
+cutoff_start <- as.Date("2020-06-15") # ignore early NYC surge before testing was widespread  
 # cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
 cutoff_end <- max(us_states_long$date)
 
 # use data since vaccines became available
 # cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
 
-us_states_long <- us_states_long_raw %>% 
-  filter(date >= cutoff_start) %>% 
-  filter(date <= cutoff_end)
-
+us_states_long <- us_states_long_raw %>% filter(date >= cutoff_start)
+us_states_long <- us_states_long %>% filter(date <= cutoff_end)
 # Remove tiny territories
 territories <- c("Guam", "Northern Mariana Islands")
 us_states_long <- us_states_long %>% filter(!(location %in% territories))
@@ -55,11 +53,12 @@ us_states <- us_states_long %>%
   arrange(state, date) %>%
   group_by(state) %>%
   # smooth the data with prior 7 days
+  # A single day number averaged over 7 days
   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
   mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>% 
-  # smooth the data with a centered mean of 7 days
   mutate(cases_1day = (cases_total - lag(cases_total, 1))) %>%
   mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>% 
+  # smooth the data with a centered mean of 7 days
   mutate(cases_1day = mean_roll_7(cases_1day)) %>%
   mutate(deaths_1day = mean_roll_7(deaths_1day)) %>% 
   # filter(date < max(date - 3)) %>% 
@@ -113,43 +112,28 @@ us %>%
     caption = "Source: NY Times, Arthur Steinmetz",
     x = "Date"
   )
-# passage of time affects deaths more than cases
-lm(deaths_1day ~ cases_1day + date, data = us) %>% tidy()
 
-# create columns for deaths led 0 to 40 days ahead
-max_lead <- 40
+
+
+lead_time <- 24 #days assumed best fit from case to death
 us_lags <- us %>%
   # create lags by day
-  tk_augment_lags(deaths_1day, .lags = 0:-max_lead, .names = "auto")
+  tk_augment_lags(deaths_1day, .lags = lead_time, .names = "auto")
 # fix names to remove minus sign
 names(us_lags) <- names(us_lags) %>% str_replace_all("lag-|lag", "lead")
+us_lags <- us_lags %>% rename("led_deaths"=last_col())
 
-# use only case dates where we have complete future knowledge of deaths for all lead times.
-us_lags <- us_lags %>% filter(date < cutoff_end - max_lead)
+# regress subset of from beginning up to specified end date
+# using global variable us_lags
+subset_period_model <- function(end_date){
+     lm(led_deaths ~ cases_1day, data = filter(us_lags,date <= end_date))
+}
 
-us_lags[1:10, 1:7] %>% kable()
-# make long form to nest
-# initialize models data frame
-models <- us_lags %>%
-  ungroup() %>%
-  pivot_longer(
-    cols = contains("lead"),
-    names_to = "lead",
-    values_to = "led_deaths"
-  ) %>%
-  select(date, cases_1day, lead, led_deaths) %>%
-  # make sure string represents correct smoothed column
-  mutate(lead = as.numeric(str_remove(lead, "deaths_1day_lead"))) %>%
-  nest(data = c(date, cases_1day, led_deaths)) %>%
-  # Run a regression on lagged cases and date vs deaths
-  mutate(model = map(
-    data,
-    function(df) {
-#      lm(led_deaths ~ cases_1day + poly(date, 2), data = df)
-      # Alt Model
-      lm(led_deaths ~ cases_1day, data = df)
-    }
-  ))
+# make first prediction at lead_time * 2
+models <- tibble(date=us_lags$date[(lead_time*2):nrow(us_lags)],
+                 model=us_lags$date[(lead_time*2):nrow(us_lags)] %>% 
+  map(subset_period_model))
+
 
 # Add regression coefficient
 # get adjusted r squared
@@ -191,7 +175,7 @@ make_predictions <- function(newdata,single_model){
 
 
 # Function to create prediction plot
-show_predictions <- function(newdata,model,label) {
+show_predictions <- function(newdata,model) {
   display <- make_predictions(newdata,model)
   gg <- display %>%
     pivot_longer(cols = where(is.numeric)) %>%
@@ -199,7 +183,7 @@ show_predictions <- function(newdata,model,label) {
     ggplot(aes(date, value, color = name)) +
     geom_line() +
     labs(
-      title = paste("Actual vs. Predicted Deaths",label),
+      title = "Actual vs. Predicted Deaths",
       x = "Date",
       y = "Count",
       caption = "Source: NY Times, Arthur Steinmetz"
@@ -207,7 +191,8 @@ show_predictions <- function(newdata,model,label) {
   gg
 }
 
-show_predictions(us,best_fit,"National Model")
+show_predictions(us,best_fit)
+
 
 
 fatality <- best_fit$data[[1]] %>%
@@ -225,6 +210,8 @@ fatality %>% ggplot(aes(date, rate)) +
     caption = "Source: NY Times, Arthur Steinmetz"
   ) +
   scale_y_continuous(labels = scales::percent)
+
+
 
 # ------------------------------------------
 # state by state analysis
@@ -343,7 +330,7 @@ best_fit_st %>% ggplot(aes(lead)) +
 target_state = "New York"
 fit_state = best_fit_st %>% filter(state == target_state)
 
-show_predictions(fit_state$data[[1]],fit_state,target_state)
+show_predictions(fit_state$data[[1]],fit_state)
 make_predictions(fit_state$data[[1]],fit_state)
 
 recent_state <- us_states %>% group_by(state) %>% 

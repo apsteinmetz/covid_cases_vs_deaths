@@ -1,6 +1,7 @@
 # correlate deaths and cases by state
 library(tidyverse)
-library(covid19nytimes)
+# library(covid19nytimes)
+library(COVID19)
 library(timetk)
 library(lubridate)
 library(broom)
@@ -15,40 +16,35 @@ library(cowplot)
 # the numbers centered on just a few days ago could be very different.
 mean_roll_7 <- slidify(mean, .period = 7, .align = "middle")
 
-# source https://github.com/nytimes/covid-19-data.git
-us_states_long_raw <- covid19nytimes::refresh_covid19nytimes_states()
+# devtools::install_github("covid19R/covid19nytimes")
+# us_states_long_raw <- covid19nytimes::refresh_covid19nytimes_states()
+us_states_raw <- COVID19::covid19(country="US",level=2,verbose=FALSE)
+
 
 # if link is broken
 # load("../data/us_states_long.rdata")
 
 cutoff_start <- as.Date("2020-06-15") 
 # cutoff_end <- max(us_states_long$date) - 7 # discard last week since there are reporting lags
-cutoff_end <- max(us_states_long_raw$date)
+# cutoff_end <- max(us_states_long_raw$date)
+cutoff_end <- min(max(us_states_raw$date),Sys.Date()-1)
+
+# # Remove tiny territories
+territories <- c("Guam", "Northern Mariana Islands","American Samoa")
 
 # use data since vaccines became available
 # cutoff_start <- as.Date("2021-03-15") # not widespread enough until then
 
-us_states_long <- us_states_long_raw %>% 
+#use covid19 package
+# rename for change to new data package
+us_states <- us_states_raw %>% 
+  as_tibble() %>% 
   filter(date >= cutoff_start) %>% 
-  filter(date <= cutoff_end)
-
-# Remove tiny territories
-territories <- c("Guam", "Northern Mariana Islands","American Samoa")
-us_states_long <- us_states_long %>% filter(!(location %in% territories))
-save(us_states_long, file = "us_states_long.rdata")
-us_states_long %>%
-  head() %>%
-  kable()
-
-
-# Create rolling average changes
-# pivot wider
-# this will also be needed when we create lags
-# discard dates before cases were tracked.
-us_states <- us_states_long %>%
-  # discard dates before cases were tracked.
-  filter(date > as.Date("2020-03-01")) %>%
-  pivot_wider(names_from = "data_type", values_from = "value") %>%
+  filter(date <= cutoff_end) %>% 
+  rename(location = administrative_area_level_2) %>% 
+  filter(!(location %in% territories)) %>% 
+  rename(deaths_total = deaths) %>% 
+  rename(cases_total = confirmed) %>% 
   rename(state = location) %>%
   select(date, state, cases_total, deaths_total) %>%
   mutate(state = as_factor(state)) %>%
@@ -56,14 +52,53 @@ us_states <- us_states_long %>%
   group_by(state) %>%
   # smooth the data with prior 7 days
   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
-  mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>% 
+  mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>%
   # smooth the data with a centered mean of 7 days
   mutate(cases_1day = (cases_total - lag(cases_total, 1))) %>%
-  mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>% 
+  mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>%
   mutate(cases_1day = mean_roll_7(cases_1day)) %>%
-  mutate(deaths_1day = mean_roll_7(deaths_1day)) %>% 
-  # filter(date < max(date - 3)) %>% 
+  mutate(deaths_1day = mean_roll_7(deaths_1day)) %>%
+  # filter(date < max(date - 3)) %>%
   {.}
+
+  
+
+# #use data from nytimes covid19 package which comes in long form
+# us_states_long <- us_states_long %>% filter(!(location %in% territories))
+
+# save(us_states_long, file = "us_states_long.rdata")
+# 
+# us_states_long %>%
+#   head() %>%
+#   kable()
+# 
+# 
+# us_states_long <- us_states_long_raw %>% 
+#   filter(date >= cutoff_start) %>% 
+#   filter(date <= cutoff_end)
+# # Create rolling average changes
+# # pivot wider
+# # this will also be needed when we create lags
+# # discard dates before cases were tracked.
+# us_states <- us_states_long %>%
+#   # discard dates before cases were tracked.
+#   filter(date > as.Date("2020-03-01")) %>%
+#   pivot_wider(names_from = "data_type", values_from = "value") %>%
+#   rename(state = location) %>%
+#   select(date, state, cases_total, deaths_total) %>%
+#   mutate(state = as_factor(state)) %>%
+#   arrange(state, date) %>%
+#   group_by(state) %>%
+#   # smooth the data with prior 7 days
+#   mutate(cases_7day = (cases_total - lag(cases_total, 7)) / 7) %>%
+#   mutate(deaths_7day = (deaths_total - lag(deaths_total, 7)) / 7)%>% 
+#   # smooth the data with a centered mean of 7 days
+#   mutate(cases_1day = (cases_total - lag(cases_total, 1))) %>%
+#   mutate(deaths_1day = (deaths_total - lag(deaths_total, 1))) %>% 
+#   mutate(cases_1day = mean_roll_7(cases_1day)) %>%
+#   mutate(deaths_1day = mean_roll_7(deaths_1day)) %>% 
+#   # filter(date < max(date - 3)) %>% 
+#   {.}
 
 # national analysis
 # ----------------------------------------------
@@ -71,7 +106,7 @@ us_states <- us_states_long %>%
 us <- us_states %>%
   group_by(date) %>%
   summarize(across(
-    .cols = where(is.double),
+    .cols = where(is.numeric),
     .fns = function(x) sum(x, na.rm = T),
     .names = "{.col}"
   ))
@@ -85,7 +120,7 @@ us %>%
   geom_point() +
   labs(
     title = "Not Useful",
-    caption = "Source: NY Times, Arthur Steinmetz"
+    caption = "Source: covid19datahub.io, Arthur Steinmetz"
   )
 
 # visualize the relationship between rolling average of weekly cases and deaths
@@ -110,7 +145,7 @@ us %>%
   labs(
     title = "U.S. Cases vs. Deaths",
     subtitle = "7-Day Average",
-    caption = "Source: NY Times, Arthur Steinmetz",
+    caption = "Source: covid19datahub.io, Arthur Steinmetz",
     x = "Date"
   )
 # passage of time affects deaths more than cases
@@ -173,7 +208,7 @@ models %>%
     subtitle = paste("Best fit lead =", best_fit$lead, "days"),
     title = "Model Fit By Lag Days",
     x = "Lead Time in Days for Deaths",
-    caption = "Source: NY Times, Arthur Steinmetz",
+    caption = "Source: covid19datahub.io, Arthur Steinmetz",
     y = "Adjusted R-squared"
   )
 best_fit$model[[1]] %>% tidy()
@@ -202,7 +237,7 @@ show_predictions <- function(newdata,model,label) {
       title = paste("Actual vs. Predicted Deaths",label),
       x = "Date",
       y = "Count",
-      caption = "Source: NY Times, Arthur Steinmetz"
+      caption = "Source: covid19datahub.io, Arthur Steinmetz"
     ) +
     theme_light() + 
     theme(legend.position = "top",legend.title = element_blank()) +
@@ -228,7 +263,7 @@ fatality %>% ggplot(aes(date, rate)) +
     x = "Date", y = "Fatality Rate",
     title = "Fatality Rates",
     subtitle = "Fatality Rate as a Percentage of Lagged Cases",
-    caption = "Source: NY Times, Arthur Steinmetz"
+    caption = "Source: covid19datahub.io, Arthur Steinmetz"
   ) +
   scale_y_continuous(labels = scales::percent)
 
@@ -260,7 +295,7 @@ us_states %>%
   labs(
     title = "U.S. Cases vs. Deaths",
     subtitle = "7-Day Average",
-    caption = "Source: NY Times, Arthur Steinmetz",
+    caption = "Source: covid19datahub.io, Arthur Steinmetz",
     x = "Date"
   )
 # create lags
@@ -314,7 +349,7 @@ models_st %>%
   facet_wrap(~state) +
   labs(
     title = "Best Fit Lead Time",
-    caption = "Source: NY Times, Arthur Steinmetz"
+    caption = "Source: covid19datahub.io, Arthur Steinmetz"
   )
 
 # best fit lag by state
@@ -331,7 +366,7 @@ best_fit_st %>% ggplot(aes(adj_r)) +
     y = "State Count",
     x = "Adjusted R-Squared",
     title = "Goodness of Fit of State Models",
-    caption = "Source:NY Times,Arthur Steinmetz"
+    caption = "Source: covid19datahub.io,Arthur Steinmetz"
   )
 best_fit_st %>% ggplot(aes(lead)) +
   geom_histogram(binwidth = 5, color = "white") +
@@ -342,7 +377,7 @@ best_fit_st %>% ggplot(aes(lead)) +
     y = "State Count",
     x = "Best Fit Model Days from Case to Death",
     title = "COVID-19 Lag Time From Cases to Death",
-    caption = "Source:NY Times,Arthur Steinmetz"
+    caption = "Source: covid19datahub.io,Arthur Steinmetz"
   )
 # Make state predictions
 # show states with largest predicted increase in deaths over national lead period

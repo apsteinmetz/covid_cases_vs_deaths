@@ -76,7 +76,7 @@ us_states_long <- us_states_lag %>%
 
 
 #plot scaled and lagged count for selected stated
-states = c("New York")
+states = c("New York","Texas")
 gg1 <- us_states_long %>%
   filter(state %in% states) %>%
   filter(type =="scaled_deaths") %>%
@@ -88,6 +88,7 @@ gg1 <- us_states_long %>%
   scale_y_continuous(labels = scales::percent) +
   labs(
     title = "What Does This Mean?",
+    subtitle = glue::glue("Relative Levels of Deaths"),
     y = "Percent of Last Years Peak",
     x = "",
     caption = "Source: covid19datahub.io, Arthur Steinmetz"
@@ -95,7 +96,6 @@ gg1 <- us_states_long %>%
   theme_light() +
   theme(legend.title = element_blank(), legend.position = "top")
 
-states = c("New York")
 gg2 <- us_states_long %>%
   filter(state %in% states) %>%
   ggplot(aes(date, value, color = type)) +
